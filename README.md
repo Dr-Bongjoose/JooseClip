@@ -34,6 +34,29 @@ cd build && make
 ./build/tests/smoketest path.mp4   # or your own file
 ```
 
+### macOS (Apple Silicon, Homebrew)
+
+```sh
+brew install qt ffmpeg pkg-config
+qmake6 jooseclip.pro
+make -j$(sysctl -n hw.ncpu)
+open jooseclip.app
+```
+
+Notes:
+- `pkg-config` is required — qmake's `PKGCONFIG` detection fails without it
+  even when ffmpeg is installed (`Project ERROR: libavformat development
+  package not found`).
+- The smoke test builds as an .app bundle; run it directly:
+  `./tests/smoketest.app/Contents/MacOS/smoketest sample.mp4`
+- The default test asset path (`/tmp/opencode/jooseclip/sample.mp4`) is a
+  VM leftover; pass any H.264/AAC mp4. A 10s clip works well — the
+  "forward 200 frames" test plays ~8.5s, so shorter assets report false
+  failures at EOF.
+
+Verified on macOS 14.6.1 arm64: Qt 6.11.2, FFmpeg 8.1 — smoke test
+222 ok / 0 fail.
+
 ## Layout
 
 ```
