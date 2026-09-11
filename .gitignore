@@ -8,6 +8,7 @@ qrc_*.cpp
 *.qmake.stash
 .qmake.stash
 Makefile*
+*.app/
 .qtc_clangd/
 compile_commands.json
 
