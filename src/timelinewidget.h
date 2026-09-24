@@ -153,4 +153,19 @@ private:
     // selection state: track 0/1 + index into that track's vector
     int selTrack_ = -1;
     int selIndex_ = -1;
+
+    // ---- async filmstrip/waveform cache ----
+    struct StripData {
+        QVector<QImage> thumbs;   // fixed count per clip
+        QVector<double> peaks;    // audio peaks 0..1
+    };
+    QHash<QString, StripData> stripCache_;  // key: path|in|dur
+    QSet<QString> pendingStrips_;
+    static QString stripKey(const Clip &c) {
+        return c.path + QLatin1Char('|') +
+               QString::number(c.sourceIn, 'f', 3) + QLatin1Char('|') +
+               QString::number(c.duration, 'f', 3);
+    }
+    void requestStrip(const Clip &c);    // kick worker if not cached/pending
+    void paintStrip(QPainter &p, const Clip &c, const QRect &r);
 };

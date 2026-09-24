@@ -2,6 +2,7 @@
 #include "medialibrary.h"
 #include "clipeffects.h"
 #include "proxymanager.h"
+#include "propertiespanel.h"
 
 #include <QMenuBar>
 #include <QDockWidget>
@@ -35,6 +36,19 @@ MainWindow::MainWindow() {
     binDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     binDock->setObjectName(QStringLiteral("MediaBinDock")); // stable id for toggle/restore
     addDockWidget(Qt::LeftDockWidgetArea, binDock);
+
+    // ---- Effect Controls (dock) ----
+    auto *props = new PropertiesPanel(timeline_, this);
+    auto *propsDock = new QDockWidget(QStringLiteral("Effect Controls"), this);
+    propsDock->setWidget(props);
+    propsDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    propsDock->setObjectName(QStringLiteral("EffectControlsDock"));
+    addDockWidget(Qt::RightDockWidgetArea, propsDock);
+    connect(props, &PropertiesPanel::effectsChanged, this, [this]() {
+        // re-render the preview with the new fx values
+        lastFrameTime_ = -1.0;
+        renderFrameAt(timeline_->playhead());
+    });
 
     // ---- Program monitor ----
     monitor_ = new QLabel(this);

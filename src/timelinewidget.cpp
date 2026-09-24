@@ -7,8 +7,12 @@
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QFileInfo>
+#include <QThread>
+#include <QMetaObject>
+#include <QPainterPath>
 #include "medialibrary.h"
 #include "theme.h"
+#include "thumbnailer.h"
 #include <algorithm>
 
 namespace {
@@ -144,6 +148,15 @@ void TimelineWidget::paintEvent(QPaintEvent *) {
             p.setPen(QColor(0x22, 0x22, 0x22));
             p.setBrush(ti ? Theme::trackV2() : Theme::trackV1());
             p.drawRoundedRect(r, 3, 3);
+            // filmstrip + waveform inside the clip
+            {
+                QPainterPath clipPath;
+                clipPath.addRoundedRect(r, 3, 3);
+                p.save();
+                p.setClipPath(clipPath);
+                paintStrip(p, c, r);
+                p.restore();
+            }
             // selection highlight (gold outline, 2px)
             if (selTrack_ == ti && selIndex_ == ci) {
                 p.setBrush(Qt::NoBrush);
@@ -482,6 +495,69 @@ void TimelineWidget::rippleDelete(const Clip &target) {
                 emit selectionChanged();
                 return;
             }
+        }
+    }
+}
+
+// ---- async filmstrip/waveform ------------------------------------------------
+
+void TimelineWidget::requestStrip(const Clip &c) {
+    QString key = stripKey(c);
+    if (stripCache_.contains(key) || pendingStrips_.contains(key)) return;
+    pendingStrips_.insert(key);
+
+    const QString path = c.path;
+    const double in = c.sourceIn, dur = c.duration;
+    const int kThumbCount = 12;   // fixed count: zoom stretches, never regenerates
+    const int kPeakCount = 300;
+    auto *thread = QThread::create([this, key, path, in, dur]() {
+        Thumbnailer th;
+        StripData sd;
+        sd.thumbs = th.filmstrip(path, in, dur, kThumbCount);
+        sd.peaks = th.waveformPeaks(path, in, dur, kPeakCount);
+        QMetaObject::invokeMethod(this, [this, key, sd]() {
+            stripCache_[key] = sd;
+            pendingStrips_.remove(key);
+            update(); // repaint with the new strip
+        }, Qt::QueuedConnection);
+    });
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
+void TimelineWidget::paintStrip(QPainter &p, const Clip &c, const QRect &r) {
+    auto it = stripCache_.constFind(stripKey(c));
+    if (it == stripCache_.constEnd()) {
+        requestStrip(c);
+        return; // flat rect until the strip lands
+    }
+    const StripData &sd = it.value();
+    // filmstrip: tiles across the clip width
+    if (!sd.thumbs.isEmpty()) {
+        const int n = sd.thumbs.size();
+        const double tileW = double(r.width()) / n;
+        for (int i = 0; i < n; ++i) {
+            QRect tr(int(r.x() + i * tileW), r.y(),
+                    int(tileW) + 1, int(r.height() * 0.7));
+            QImage img = sd.thumbs[i];
+            if (img.isNull()) continue;
+            p.drawImage(tr, img.scaled(tr.size(), Qt::IgnoreAspectRatio,
+                                       Qt::SmoothTransformation));
+        }
+    }
+    // waveform: peaks drawn in the bottom strip
+    if (!sd.peaks.isEmpty()) {
+        const int waveH = int(r.height() * 0.26);
+        QRect wr = r.adjusted(0, r.height() - waveH, 0, 0);
+        p.fillRect(wr, QColor(0, 0, 0, 120));
+        const int n = sd.peaks.size();
+        p.setPen(QPen(Theme::green(), 1));
+        int midY = wr.y() + wr.height() / 2;
+        for (int i = 0; i < wr.width(); ++i) {
+            int idx = int(double(i) * n / wr.width());
+            double peak = sd.peaks[qBound(0, idx, n - 1)];
+            int h = qMax(1, int(peak * (wr.height() / 2 - 1)));
+            p.drawLine(wr.x() + i, midY - h, wr.x() + i, midY + h);
         }
     }
 }
