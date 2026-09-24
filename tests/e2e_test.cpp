@@ -12,6 +12,7 @@
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <QFileInfo>
 #include <QImage>
 #include <QThread>
 #include <QDebug>

@@ -17,6 +17,7 @@ SOURCES += \
     ../src/clipeffects.cpp \
     ../src/theme.cpp \
     ../src/medialibrary.cpp \
+    ../src/thumbnailer.cpp \
     ../src/decoder.cpp
 
 HEADERS += \
@@ -25,7 +26,8 @@ HEADERS += \
     ../src/medialibrary.h \
     ../src/decoder.h \
     ../src/clipeffects.h \
-    ../src/theme.h
+    ../src/theme.h \
+    ../src/thumbnailer.h
 
 # timelinewidget.cpp -> MediaLibrary::probe (medialibrary.cpp) needs FFmpeg
 CONFIG += link_pkgconfig
