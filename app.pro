@@ -13,7 +13,8 @@ SOURCES += \
     src/clipeffects.cpp \
     src/theme.cpp \
     src/proxymanager.cpp \
-    src/thumbnailer.cpp
+    src/thumbnailer.cpp \
+    src/propertiespanel.cpp
 
 HEADERS += \
     src/decoder.h \
@@ -24,7 +25,8 @@ HEADERS += \
     src/clipeffects.h \
     src/theme.h \
     src/proxymanager.h \
-    src/thumbnailer.h
+    src/thumbnailer.h \
+    src/propertiespanel.h
 
 # FFmpeg (C API — the "C" part you'd have written by hand)
 CONFIG += link_pkgconfig
