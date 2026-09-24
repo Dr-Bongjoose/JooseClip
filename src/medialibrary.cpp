@@ -5,6 +5,9 @@
 #include <QDrag>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QThread>
+#include <QMetaObject>
+#include "thumbnailer.h"
 
 MediaLibrary::MediaLibrary(QWidget *parent) : QListWidget(parent) {
     setSelectionMode(QAbstractItemView::ExtendedSelection);
@@ -58,6 +61,18 @@ void MediaLibrary::addPath(const QString &path) {
                          .arg(info.name).arg(info.width).arg(info.height)
                          .arg(info.fps, 0, 'f', 2).arg(info.duration, 0, 'f', 2));
     infos_[item] = info;
+    // Poster thumbnail, generated off-thread to keep imports snappy.
+    const QString p = path;
+    auto *th = QThread::create([this, item, p]() {
+        Thumbnailer tn;
+        QImage img = tn.poster(p, 48);
+        QMetaObject::invokeMethod(this, [this, item, img]() {
+            if (!img.isNull() && infos_.contains(item))
+                item->setIcon(QPixmap::fromImage(img));
+        }, Qt::QueuedConnection);
+    });
+    connect(th, &QThread::finished, th, &QObject::deleteLater);
+    th->start();
 }
 
 void MediaLibrary::dragEnterEvent(QDragEnterEvent *e) {

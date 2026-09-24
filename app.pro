@@ -14,7 +14,9 @@ SOURCES += \
     src/theme.cpp \
     src/proxymanager.cpp \
     src/thumbnailer.cpp \
-    src/propertiespanel.cpp
+    src/propertiespanel.cpp \
+    src/exportdialog.cpp \
+    src/exporter.cpp
 
 HEADERS += \
     src/decoder.h \
@@ -26,7 +28,9 @@ HEADERS += \
     src/theme.h \
     src/proxymanager.h \
     src/thumbnailer.h \
-    src/propertiespanel.h
+    src/propertiespanel.h \
+    src/exportdialog.h \
+    src/exporter.h
 
 # FFmpeg (C API — the "C" part you'd have written by hand)
 CONFIG += link_pkgconfig

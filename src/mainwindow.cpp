@@ -3,6 +3,7 @@
 #include "clipeffects.h"
 #include "proxymanager.h"
 #include "propertiespanel.h"
+#include "exportdialog.h"
 
 #include <QMenuBar>
 #include <QDockWidget>
@@ -26,7 +27,7 @@
 #include <algorithm>
 
 MainWindow::MainWindow() {
-    setWindowTitle(QStringLiteral("JooseClip v0.1"));
+    setWindowTitle(QStringLiteral("JooseClip v0.2"));
     resize(1500, 900);
 
     // ---- Media bin (dock) ----
@@ -569,8 +570,8 @@ void MainWindow::importFolder() {
 }
 
 void MainWindow::showExportDialog() {
-    // Placeholder until the Exporter module lands; wiring comes with the merge.
-    statusBar()->showMessage(tr("Export module integration pending."), 3000);
+    ExportDialog dlg(timeline_, this);
+    dlg.exec();
 }
 
 void MainWindow::cancelExport() {}
