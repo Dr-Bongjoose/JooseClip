@@ -6,6 +6,7 @@
 #include <QLabel>
 #include <QHash>
 #include <QCloseEvent>
+#include <mutex>
 #include "decoder.h"
 #include "timelinewidget.h"
 #include "audioengine.h"
@@ -48,6 +49,7 @@ private:
     QTimer playTimer_;
     QElapsedTimer clock_;
     AudioEngine *audio_ = nullptr;
+    std::mutex audioSync_; // guards timeline vectors + decoder registry vs audio thread
     QByteArray defaultPanelState_; // baseline dock layout for Window > Reset
     double playingStartPlayhead_ = 0.0;
     bool playing_ = false;

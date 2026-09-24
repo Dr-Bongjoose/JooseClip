@@ -4,6 +4,8 @@
 #include <QImage>
 #include <QVector>
 #include <QHash>
+#include <QMutex>
+#include <QMutexLocker>
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -75,6 +77,12 @@ private:
     MediaInfo info_;
     bool open_ = false;
 
+    // Audio and video are pulled from different threads (QAudioSink pull
+    // thread vs GUI render thread). One mutex per media type: both sides can
+    // work concurrently, but each stream's FFmpeg context is protected.
+    QMutex videoMutex_;
+    QMutex audioMutex_;
+
     AVFormatContext *fmt_ = nullptr;
     int videoStream_ = -1;
     AVCodecContext *vctx_ = nullptr;
@@ -92,8 +100,10 @@ private:
     double audioRangeStart_ = -1.0;   // start of pcm_ buffer
     std::vector<int16_t> pcm_;        // interleaved s16le samples
 
-    AVPacket *pkt_ = nullptr;
-    AVFrame *frame_ = nullptr;
+    AVPacket *pkt_ = nullptr;      // video side (audio uses its own)
+    AVFrame *frame_ = nullptr;     // video side
+    AVPacket *apkt_ = nullptr;     // audio side packet
+    AVFrame *aframe_ = nullptr;    // audio side frame
 
     // Sorted by pts (monotonic during forward decode).
     QVector<CachedFrame> cache_;

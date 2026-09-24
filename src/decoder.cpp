@@ -12,6 +12,8 @@ Decoder::Decoder(const MediaInfo &info) : info_(info) {}
 Decoder::~Decoder() {
     if (pkt_) av_packet_free(&pkt_);
     if (frame_) av_frame_free(&frame_);
+    if (apkt_) av_packet_free(&apkt_);
+    if (aframe_) av_frame_free(&aframe_);
     if (sws_) sws_freeContext(sws_);
     if (vctx_) avcodec_free_context(&vctx_);
     if (actx_) avcodec_free_context(&actx_);
@@ -27,7 +29,9 @@ bool Decoder::ensureOpen() {
     err = avformat_find_stream_info(fmt_, nullptr);
     if (err < 0) { qWarning() << "find_stream_info failed" << avErr(err); return false; }
     openStreams();
-    open_ = videoStream_ >= 0 && vctx_;
+    // success when either a video or an audio stream opened (audio-only
+    // files like wav/mp3 are valid timeline clips)
+    open_ = (videoStream_ >= 0 && vctx_) || (audioStream_ >= 0 && actx_);
     return open_;
 }
 
@@ -56,6 +60,7 @@ void Decoder::openStreams() {
 
 // Keyframe-seek to just before t, then decode forward until we cover t.
 // Used for jumps too big for sequential decode (scrubs, replay, etc).
+// Caller must hold videoMutex_.
 QImage Decoder::seekDecode(double t, double &ptsOut) {
     AVStream *vs = fmt_->streams[videoStream_];
     int64_t target = int64_t(t / av_q2d(vs->time_base));
@@ -146,7 +151,9 @@ bool Decoder::decodeNext() {
 }
 
 QImage Decoder::frameAt(double t, double &ptsOut) {
+    QMutexLocker lock(&videoMutex_);
     if (!ensureOpen()) return QImage();
+    if (videoStream_ < 0 || !vctx_) return QImage(); // audio-only file
 
     // 1) cache hit: last frame with pts <= t, when the next frame is past t
     //    — no decode needed. A hit on the newest cached frame only counts
@@ -195,16 +202,22 @@ QImage Decoder::frameAt(double t, double &ptsOut) {
 
 // Open a dedicated AVFormatContext for audio demuxing. The video path owns
 // fmt_ and seeks it constantly; sharing would corrupt both streams.
+// Caller must hold audioMutex_.
 bool Decoder::ensureAudioOpen() {
-    if (audioStream_ < 0) {
-        // index not yet found: probe once via the main context
-        if (!ensureOpen()) return false;
-        for (unsigned i = 0; i < fmt_->nb_streams; ++i) {
-            if (fmt_->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+    // Index the streams (shared with video side; the *index* is stable).
+    if (audioStream_ < 0 && !fmt_) {
+        // probe via a temporary context so we don't depend on video open
+        AVFormatContext *tmp = nullptr;
+        if (avformat_open_input(&tmp, info_.path.toUtf8().constData(), nullptr, nullptr) < 0)
+            return false;
+        avformat_find_stream_info(tmp, nullptr);
+        for (unsigned i = 0; i < tmp->nb_streams; ++i) {
+            if (tmp->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
                 audioStream_ = int(i);
                 break;
             }
         }
+        avformat_close_input(&tmp);
         if (audioStream_ < 0) return false;
     }
     if (actx_ && afmt_) return true;
@@ -214,24 +227,33 @@ bool Decoder::ensureAudioOpen() {
     if (avformat_open_input(&afmt_, info_.path.toUtf8().constData(), nullptr, nullptr) < 0) {
         avformat_free_context(afmt_);
         afmt_ = nullptr;
-        audioStream_ = -1;
         return false;
     }
     avformat_find_stream_info(afmt_, nullptr);
 
     AVStream *st = afmt_->streams[audioStream_];
     const AVCodec *codec = avcodec_find_decoder(st->codecpar->codec_id);
-    if (!codec) return false;
+    if (!codec) {
+        // no decoder: close the context now so we don't leak or retry-open
+        avformat_close_input(&afmt_);
+        afmt_ = nullptr;
+        audioStream_ = -1;
+        return false;
+    }
     actx_ = avcodec_alloc_context3(codec);
     avcodec_parameters_to_context(actx_, st->codecpar);
     actx_->pkt_timebase = st->time_base;
     if (avcodec_open2(actx_, codec, nullptr) < 0) {
         avcodec_free_context(&actx_);
+        avformat_close_input(&afmt_);
+        afmt_ = nullptr;
         audioStream_ = -1;
         return false;
     }
     sampleRate_ = actx_->sample_rate;
     channels_ = actx_->ch_layout.nb_channels;
+    if (!apkt_) apkt_ = av_packet_alloc();
+    if (!aframe_) aframe_ = av_frame_alloc();
     return true;
 }
 
@@ -243,14 +265,18 @@ void Decoder::resetAudioRange() {
 }
 
 // Decode s16le interleaved PCM for [from, from+maxSec). Reuses pcm_ when the
-// requested window is already covered; seeks + re-decodes otherwise.
+// requested range is already decoded; seeks + re-decodes otherwise.
 int64_t Decoder::decodeAudio(double from, double maxSec, std::vector<int16_t> &out) {
+    QMutexLocker lock(&audioMutex_);
     if (!ensureAudioOpen()) return -1;
     if (maxSec <= 0) return 0;
 
     const double covered = audioDecodedUpTo_ >= 0 && audioRangeStart_ >= 0 &&
                            from >= audioRangeStart_ && from + maxSec <= audioDecodedUpTo_;
     if (!covered) {
+        // decode forward past the request so the next pull (arriving ~10-30ms
+        // later) hits the cache instead of forcing a seek per buffer
+        const double window = maxSec + 0.25;
         // seek to a bit before the requested point, then decode forward
         int64_t target = int64_t(from * actx_->sample_rate) * actx_->time_base.den /
                          (actx_->time_base.num * actx_->sample_rate);
@@ -260,26 +286,26 @@ int64_t Decoder::decodeAudio(double from, double maxSec, std::vector<int16_t> &o
         audioRangeStart_ = from;
         audioDecodedUpTo_ = from;
 
-        const double until = from + maxSec;
+        const double until = from + window;
         bool eofAudio = false;
         while (audioDecodedUpTo_ < until && !eofAudio) {
             bool fed = false;
             while (!fed) {
-                int err = av_read_frame(afmt_, pkt_);
+                int err = av_read_frame(afmt_, apkt_);
                 if (err < 0) {
                     avcodec_send_packet(actx_, nullptr); // flush
                     eofAudio = true;
                     break;
                 }
-                if (pkt_->stream_index == audioStream_) {
-                    avcodec_send_packet(actx_, pkt_);
-                    av_packet_unref(pkt_);
+                if (apkt_->stream_index == audioStream_) {
+                    avcodec_send_packet(actx_, apkt_);
+                    av_packet_unref(apkt_);
                     fed = true;
                 } else {
-                    av_packet_unref(pkt_);
+                    av_packet_unref(apkt_);
                 }
             }
-            while (avcodec_receive_frame(actx_, frame_) == 0) {
+            while (avcodec_receive_frame(actx_, aframe_) == 0) {
                 if (!swr_) {
                     AVChannelLayout outCh;
                     av_channel_layout_default(&outCh, channels_);
@@ -291,21 +317,21 @@ int64_t Decoder::decodeAudio(double from, double maxSec, std::vector<int16_t> &o
                 }
                 uint8_t *dstPtr = nullptr;
                 int dstSamples = av_rescale_rnd(
-                    swr_get_delay(swr_, actx_->sample_rate) + frame_->nb_samples,
+                    swr_get_delay(swr_, actx_->sample_rate) + aframe_->nb_samples,
                     sampleRate_, actx_->sample_rate, AV_ROUND_UP);
                 size_t prevSize = pcm_.size();
                 pcm_.resize(prevSize + size_t(dstSamples) * channels_);
                 dstPtr = reinterpret_cast<uint8_t *>(pcm_.data() + prevSize);
                 int got = swr_convert(swr_, &dstPtr, dstSamples,
-                                      frame_->extended_data, frame_->nb_samples);
+                                      aframe_->extended_data, aframe_->nb_samples);
                 if (got > 0) {
                     pcm_.resize(prevSize + size_t(got) * channels_);
-                    double frameDur = double(frame_->nb_samples) / actx_->sample_rate;
+                    double frameDur = double(aframe_->nb_samples) / actx_->sample_rate;
                     audioDecodedUpTo_ += frameDur;
                 } else {
                     pcm_.resize(prevSize);
                 }
-                av_frame_unref(frame_);
+                av_frame_unref(aframe_);
             }
         }
     }

@@ -7,6 +7,7 @@
 #include <QIODevice>
 #include <atomic>
 #include <functional>
+#include <mutex>
 #include "decoder.h"
 #include "timelinewidget.h"
 
@@ -22,6 +23,9 @@ public:
 
     void setTimeline(const QVector<Clip> *v1, const QVector<Clip> *v2);
     void setDecoderLookup(DecoderLookup lookup) { lookup_ = std::move(lookup); }
+    // Guards shared state (timeline vectors + decoder registry) that the
+    // audio pull thread reads while the GUI thread edits it.
+    void setSyncMutex(std::mutex *m) { syncMutex_ = m; }
     void playFrom(double t);
     void stop();
     bool playing() const { return playing_; }
@@ -51,6 +55,7 @@ private:
     const QVector<Clip> *v1_ = nullptr;
     const QVector<Clip> *v2_ = nullptr;
     DecoderLookup lookup_;
+    std::mutex *syncMutex_ = nullptr;
     double playhead_ = 0.0;
     std::atomic<bool> playing_{false};
 };

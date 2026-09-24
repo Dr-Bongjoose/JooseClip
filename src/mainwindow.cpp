@@ -88,6 +88,7 @@ MainWindow::MainWindow() {
     // audio
     audio_ = new AudioEngine(this);
     audio_->setTimeline(&timeline_->model.v1, &timeline_->model.v2);
+    audio_->setSyncMutex(&audioSync_);
     audio_->setDecoderLookup([this](const QString &p) { return decoderFor(p); });
 
     // Premiere-style shortcuts.
@@ -178,6 +179,7 @@ void MainWindow::onPlayheadMoved(double t) {
 }
 
 Decoder *MainWindow::decoderFor(const QString &path) {
+    std::lock_guard<std::mutex> lock(audioSync_); // shared with audio thread
     auto it = decoders_.find(path);
     if (it != decoders_.end()) return *it;
     MediaInfo info = MediaLibrary::probe(path);
@@ -187,6 +189,7 @@ Decoder *MainWindow::decoderFor(const QString &path) {
 }
 
 void MainWindow::clearDecoders() {
+    std::lock_guard<std::mutex> lock(audioSync_);
     qDeleteAll(decoders_);
     decoders_.clear();
 }
@@ -194,22 +197,29 @@ void MainWindow::clearDecoders() {
 void MainWindow::renderFrameAt(double t) {
     const Clip *clip = nullptr;
     int track = 0;
-    if (!timeline_->model.clipAt(t, &clip, &track)) {
-        monitor_->setText(tr("No clip at playhead"));
-        lastFrameTime_ = -1;
-        return;
+    // shared with audio thread: copy lookup data under the sync mutex
+    QString path;
+    double local = 0;
+    {
+        std::lock_guard<std::mutex> lock(audioSync_);
+        if (!timeline_->model.clipAt(t, &clip, &track)) {
+            monitor_->setText(tr("No clip at playhead"));
+            lastFrameTime_ = -1;
+            return;
+        }
+        path = clip->path;
+        local = t - clip->timelineStart + clip->sourceIn;
     }
-    double local = t - clip->timelineStart + clip->sourceIn;
     // cache: same frame -> skip decode
     if (qAbs(local - lastFrameTime_) < 0.004 && !lastImage_.isNull() &&
-        lastFramePath_ == clip->path) return;
-    Decoder *dec = decoderFor(clip->path);
+        lastFramePath_ == path) return;
+    Decoder *dec = decoderFor(path); // registry guarded by audioSync_ inside
     double pts = 0;
     QImage img = dec->frameAt(local, pts);
     if (!img.isNull()) {
         lastImage_ = img;
         lastFrameTime_ = local;
-        lastFramePath_ = clip->path;
+        lastFramePath_ = path;
         monitor_->setPixmap(QPixmap::fromImage(
             img.scaled(monitor_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation)));
     }
@@ -229,7 +239,13 @@ void MainWindow::togglePlay() {
 }
 
 void MainWindow::tick() {
-    double t = playingStartPlayhead_ + clock_.elapsed() / 1000.0;
+    double t;
+    if (audio_->playing()) {
+        // audio clock is master: video follows consumed samples (no drift)
+        t = audio_->playheadSeconds();
+    } else {
+        t = playingStartPlayhead_ + clock_.elapsed() / 1000.0;
+    }
     if (t > timeline_->model.sequenceEnd()) togglePlay();
     timeline_->setPlayhead(t);
     renderFrameAt(t);
