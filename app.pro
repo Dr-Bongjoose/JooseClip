@@ -6,6 +6,7 @@ TEMPLATE = app
 SOURCES += \
     src/main.cpp \
     src/decoder.cpp \
+    src/exporter.cpp \
     src/medialibrary.cpp \
     src/timelinewidget.cpp \
     src/mainwindow.cpp \
@@ -20,6 +21,7 @@ SOURCES += \
 
 HEADERS += \
     src/decoder.h \
+    src/exporter.h \
     src/medialibrary.h \
     src/timelinewidget.h \
     src/mainwindow.h \
