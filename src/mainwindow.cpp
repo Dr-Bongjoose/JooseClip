@@ -127,6 +127,12 @@ void MainWindow::saveProject() {
         o["srcIn"] = c.sourceIn;
         o["dur"] = c.duration;
         o["track"] = 1;
+        QJsonObject fxo;
+        fxo["brightness"] = c.fx.brightness;
+        fxo["contrast"] = c.fx.contrast;
+        fxo["saturation"] = c.fx.saturation;
+        fxo["gamma"] = c.fx.gamma;
+        o["fx"] = fxo;
         arr.append(o);
     }
     for (const auto &c : timeline_->model.v2) {
@@ -136,6 +142,12 @@ void MainWindow::saveProject() {
         o["srcIn"] = c.sourceIn;
         o["dur"] = c.duration;
         o["track"] = 2;
+        QJsonObject fxo;
+        fxo["brightness"] = c.fx.brightness;
+        fxo["contrast"] = c.fx.contrast;
+        fxo["saturation"] = c.fx.saturation;
+        fxo["gamma"] = c.fx.gamma;
+        o["fx"] = fxo;
         arr.append(o);
     }
     QJsonObject root;
@@ -156,6 +168,7 @@ void MainWindow::openProject() {
     QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
     timeline_->model.v1.clear();
     timeline_->model.v2.clear();
+    timeline_->clearSelection();
     for (const QJsonValue &v : doc.object()["clips"].toArray()) {
         QJsonObject o = v.toObject();
         MediaInfo info = MediaLibrary::probe(o["path"].toString());
@@ -166,6 +179,12 @@ void MainWindow::openProject() {
         c.sourceIn = o["srcIn"].toDouble();
         c.duration = o["dur"].toDouble();
         c.timelineStart = o["start"].toDouble();
+        QJsonObject fxo = o["fx"].toObject();
+        c.fx.brightness = fxo["brightness"].toDouble();
+        c.fx.contrast = fxo["contrast"].toDouble(c.fx.contrast);
+        c.fx.saturation = fxo["saturation"].toDouble(c.fx.saturation);
+        c.fx.gamma = fxo["gamma"].toDouble(c.fx.gamma);
+        c.fx.clamp();
         (o["track"].toInt() == 2 ? timeline_->model.v2 : timeline_->model.v1).append(c);
     }
     timeline_->model.sortTrack(timeline_->model.v1);

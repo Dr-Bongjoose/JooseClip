@@ -5,6 +5,7 @@
 #include <QVector>
 #include <QElapsedTimer>
 #include "decoder.h"
+#include "clipeffects.h"
 
 struct Clip {
     QString path;       // source media path
@@ -12,10 +13,12 @@ struct Clip {
     double sourceIn = 0.0;   // seconds into source
     double timelineStart = 0.0; // seconds on timeline
     double duration = 0.0;      // timeline duration (== source length for v1)
+    ClipEffects fx;            // per-clip color effects (identity = none)
 
     bool operator==(const Clip &o) const {
         return path == o.path && sourceIn == o.sourceIn &&
-               timelineStart == o.timelineStart && duration == o.duration;
+               timelineStart == o.timelineStart && duration == o.duration &&
+               fx == o.fx;
     }
 };
 
@@ -63,6 +66,21 @@ public:
     void rippleDelete(const Clip &c);
     void splitAt(double t);
 
+    // ---- selection (single clip; PropertiesPanel reads/writes this) ----
+    // Pointer into the model — valid until the next mutation/sort. Use
+    // selectedTrack()/selectedIndex() for stable identification instead.
+    const Clip *selectedClip() const;
+    int selectedTrack() const { return selTrack_; }
+    int selectedIndex() const { return selIndex_; }
+    bool hasSelection() const { return selTrack_ >= 0; }
+    // Select topmost clip at time t (both tracks). Returns true if the
+    // selection changed. Emits selectionChanged().
+    bool selectAt(double t);
+    void clearSelection();
+    // Write effects onto the selected clip (pushes undo, emits modelChanged
+    // + selectionChanged). Call with audioSync_ held (see MainWindow).
+    bool setEffectsOnSelected(const ClipEffects &fx);
+
     // Undo/redo: automatic snapshots of the full model before each mutation.
     void pushUndo();
     bool undo();
@@ -80,6 +98,7 @@ signals:
     void playheadMoved(double t);
     void modelChanged();
     void undoStateChanged();
+    void selectionChanged();
 
 protected:
     void paintEvent(QPaintEvent *) override;
@@ -126,4 +145,8 @@ private:
     double dragGrabOffset_ = 0.0; // grab point inside clip (seconds)
     int dragTrack_ = 0;
     int dragIndex_ = -1;
+
+    // selection state: track 0/1 + index into that track's vector
+    int selTrack_ = -1;
+    int selIndex_ = -1;
 };

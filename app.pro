@@ -9,14 +9,18 @@ SOURCES += \
     src/medialibrary.cpp \
     src/timelinewidget.cpp \
     src/mainwindow.cpp \
-    src/audioengine.cpp
+    src/audioengine.cpp \
+    src/clipeffects.cpp \
+    src/theme.cpp
 
 HEADERS += \
     src/decoder.h \
     src/medialibrary.h \
     src/timelinewidget.h \
     src/mainwindow.h \
-    src/audioengine.h
+    src/audioengine.h \
+    src/clipeffects.h \
+    src/theme.h
 
 # FFmpeg (C API — the "C" part you'd have written by hand)
 CONFIG += link_pkgconfig

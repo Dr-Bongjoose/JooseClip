@@ -8,6 +8,7 @@
 #include <QDropEvent>
 #include <QFileInfo>
 #include "medialibrary.h"
+#include "theme.h"
 #include <algorithm>
 
 namespace {
@@ -62,6 +63,7 @@ bool TimelineWidget::undo() {
     ModelState st = undoStack_.takeLast();
     model.v1 = st.v1;
     model.v2 = st.v2;
+    clearSelection(); // indexes are stale after a model swap
     update();
     emit modelChanged();
     emit undoStateChanged();
@@ -78,6 +80,7 @@ bool TimelineWidget::redo() {
     ModelState st = redoStack_.takeLast();
     model.v1 = st.v1;
     model.v2 = st.v2;
+    clearSelection(); // indexes are stale after a model swap
     update();
     emit modelChanged();
     emit undoStateChanged();
@@ -117,14 +120,20 @@ void TimelineWidget::paintEvent(QPaintEvent *) {
         QColor bg = (ti == 1) ? QColor(0x14, 0x1a, 0x14) : QColor(0x12, 0x14, 0x1a);
         p.fillRect(0, y, width(), kTrackH, bg);
         const QVector<Clip> &track = ti ? model.v2 : model.v1;
-        const QColor &col = ti ? kV2Color : kV1Color;
-        for (const Clip &c : track) {
+        for (int ci = 0; ci < track.size(); ++ci) {
+            const Clip &c = track[ci];
             int x1 = timeToX(c.timelineStart);
             int x2 = timeToX(c.timelineStart + c.duration);
             QRect r(x1, y + 4, qMax(4, x2 - x1), kTrackH - 8);
             p.setPen(QColor(0x22, 0x22, 0x22));
-            p.setBrush(col);
+            p.setBrush(ti ? Theme::trackV2() : Theme::trackV1());
             p.drawRoundedRect(r, 3, 3);
+            // selection highlight (gold outline, 2px)
+            if (selTrack_ == ti && selIndex_ == ci) {
+                p.setBrush(Qt::NoBrush);
+                p.setPen(QPen(Theme::gold(), 2));
+                p.drawRoundedRect(r.adjusted(-1, -1, 1, 1), 3, 3);
+            }
             p.setPen(Qt::white);
             p.drawText(r.adjusted(4, 2, -4, -2), Qt::AlignTop | Qt::AlignLeft,
                        QFileInfo(c.path).fileName());
@@ -232,15 +241,21 @@ void TimelineWidget::mousePressEvent(QMouseEvent *e) {
         return;
     }
     if (idx >= 0) {
-        // move
+        // move + select
         mode_ = Mode::MoveClip;
         dragTrack_ = track;
         dragIndex_ = idx;
         dragGrabOffset_ = t - tr[idx].timelineStart;
         dragChanged_ = false;
+        selTrack_ = track;
+        selIndex_ = idx;
+        emit selectionChanged();
         pushUndo();
+        update();
         return;
     }
+    // click on empty track space: clear selection
+    clearSelection();
     mode_ = Mode::None;
 }
 
@@ -414,8 +429,11 @@ void TimelineWidget::rippleDelete(const Clip &target) {
                 double gap = target.duration;
                 tr.removeAt(i);
                 pushRightClips(tr, target.timelineStart, -gap);
+                if (selTrack_ == ti && selIndex_ == i) clearSelection();
+                else if (selTrack_ == ti && selIndex_ > i) --selIndex_;
                 update();
                 emit modelChanged();
+                emit selectionChanged();
                 return;
             }
         }
@@ -439,10 +457,64 @@ void TimelineWidget::splitAt(double t) {
                 left.duration = cut;
                 tr[i] = left;       // non-const op[] -> detaches from snapshot
                 tr.insert(i + 1, right);
+                // selection: keep pointing at the left part of the split
+                if (selTrack_ == ti) {
+                    if (selIndex_ == i) { /* stays on left */ }
+                    else if (selIndex_ > i) ++selIndex_; // shifted right by insert
+                }
                 update();
                 emit modelChanged();
+                emit selectionChanged();
                 return;
             }
         }
     }
+}
+
+// ---- selection ------------------------------------------------------------
+
+const Clip *TimelineWidget::selectedClip() const {
+    if (selTrack_ < 0 || selTrack_ > 1) return nullptr;
+    const QVector<Clip> &tr = selTrack_ ? model.v2 : model.v1;
+    if (selIndex_ < 0 || selIndex_ >= tr.size()) return nullptr;
+    return &tr[selIndex_];
+}
+
+bool TimelineWidget::selectAt(double t) {
+    const Clip *c = nullptr;
+    int track = 0;
+    if (!model.clipAt(t, &c, &track)) { clearSelection(); return false; }
+    const QVector<Clip> &tr = track ? model.v2 : model.v1;
+    for (int i = 0; i < tr.size(); ++i)
+        if (&tr[i] == c) {
+            if (selTrack_ != track || selIndex_ != i) {
+                selTrack_ = track; selIndex_ = i;
+                update();
+                emit selectionChanged();
+                return true;
+            }
+            return false;
+        }
+    return false;
+}
+
+void TimelineWidget::clearSelection() {
+    if (selTrack_ < 0) return;
+    selTrack_ = -1;
+    selIndex_ = -1;
+    update();
+    emit selectionChanged();
+}
+
+bool TimelineWidget::setEffectsOnSelected(const ClipEffects &fx) {
+    if (selTrack_ < 0 || selIndex_ < 0) return false;
+    QVector<Clip> &tr = selTrack_ ? model.v2 : model.v1;
+    if (selIndex_ >= tr.size()) return false;
+    if (tr[selIndex_].fx == fx) return false; // no change, no undo push
+    pushUndo();
+    tr[selIndex_].fx = fx;
+    update();
+    emit modelChanged();
+    emit selectionChanged();
+    return true;
 }
