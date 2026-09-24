@@ -1,18 +1,6 @@
-# build artifacts
 build/
 *.o
-*.a
 moc_*.cpp
-moc_*.h
-qrc_*.cpp
-*.qmake.stash
-.qmake.stash
 Makefile*
-.qtc_clangd/
-compile_commands.json
-
-# editor/OS
-.vscode/
-.idea/
-*.swp
-.DS_Store
+.qmake.stash
+smoketest
