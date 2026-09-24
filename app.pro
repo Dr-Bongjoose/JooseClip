@@ -11,7 +11,8 @@ SOURCES += \
     src/mainwindow.cpp \
     src/audioengine.cpp \
     src/clipeffects.cpp \
-    src/theme.cpp
+    src/theme.cpp \
+    src/propertiespanel.cpp
 
 HEADERS += \
     src/decoder.h \
@@ -20,7 +21,8 @@ HEADERS += \
     src/mainwindow.h \
     src/audioengine.h \
     src/clipeffects.h \
-    src/theme.h
+    src/theme.h \
+    src/propertiespanel.h
 
 # FFmpeg (C API — the "C" part you'd have written by hand)
 CONFIG += link_pkgconfig
