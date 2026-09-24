@@ -402,28 +402,49 @@ void TimelineWidget::dragMoveEvent(QDragMoveEvent *e) {
 }
 
 void TimelineWidget::dropEvent(QDropEvent *e) {
-    QString path = e->mimeData()->text();
-    if (path.isEmpty()) {
-        for (const QUrl &u : e->mimeData()->urls()) { path = u.toLocalFile(); break; }
-    }
-    if (path.isEmpty()) return;
-
-    MediaInfo info = MediaLibrary::probe(path);
-    if (!info.hasVideo && !info.hasAudio) return;
+    // Collect every dropped path: mime text (bin drags newline-joined
+    // paths) or file URLs (file manager / multi-select bin drag).
+    QStringList paths;
+    if (e->mimeData()->hasText())
+        paths = e->mimeData()->text().split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    if (e->mimeData()->hasUrls())
+        for (const QUrl &u : e->mimeData()->urls()) {
+            QString p = u.toLocalFile();
+            if (!p.isEmpty() && !paths.contains(p)) paths << p;
+        }
+    if (paths.isEmpty()) return;
 
     int track = trackAt(e->position().toPoint().y());
     if (track < 0) track = 0;
 
     pushUndo();
-    Clip c;
-    c.path = info.path;
-    c.info = info;
-    c.sourceIn = 0.0;
-    c.duration = info.duration;
-    c.timelineStart = snapTime(qMax(0.0, xToTime(int(e->position().x()))), 0, 0);
-    addClipToTrack(track, c, true);
-    e->acceptProposedAction();
-    emit modelChanged();
+    double startT = snapTime(qMax(0.0, xToTime(int(e->position().x()))), 0, 0);
+    bool any = false;
+    for (const QString &path : paths) {
+        MediaInfo info = MediaLibrary::probe(path);
+        if (!info.hasVideo && !info.hasAudio) continue;
+        Clip c;
+        c.path = info.path;
+        c.info = info;
+        c.sourceIn = 0.0;
+        c.duration = info.duration;
+        c.timelineStart = startT;
+        addClipToTrack(track, c, true);
+        startT += info.duration; // append sequentially like Premiere
+        any = true;
+    }
+    if (any) {
+        e->acceptProposedAction();
+        emit modelChanged();
+    } else {
+        // nothing landed: drop the snapshot pushed above
+        if (!undoStack_.isEmpty()) {
+            ModelState st;
+            st.v1 = model.v1;
+            st.v2 = model.v2;
+            if (undoStack_.last() == st) undoStack_.removeLast();
+        }
+    }
 }
 
 void TimelineWidget::addClipToTrack(int track, const Clip &c, bool pushDown) {

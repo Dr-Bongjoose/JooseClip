@@ -7,7 +7,7 @@
 #include <QDropEvent>
 
 MediaLibrary::MediaLibrary(QWidget *parent) : QListWidget(parent) {
-    setSelectionMode(QAbstractItemView::SingleSelection);
+    setSelectionMode(QAbstractItemView::ExtendedSelection);
     setDragEnabled(true);
     setAcceptDrops(true);
     setDropIndicatorShown(true);
@@ -78,13 +78,22 @@ void MediaLibrary::dropEvent(QDropEvent *e) {
 }
 
 void MediaLibrary::startDrag(Qt::DropActions) {
-    QListWidgetItem *item = currentItem();
-    if (!item) return;
-    MediaInfo info = infos_.value(item, MediaInfo());
-    if (info.path.isEmpty()) return;
+    const QList<QListWidgetItem*> items = selectedItems();
+    if (items.isEmpty()) return;
+
+    QList<QUrl> urls;
+    QStringList paths;
+    for (QListWidgetItem *item : items) {
+        MediaInfo info = infos_.value(item, MediaInfo());
+        if (info.path.isEmpty()) continue;
+        urls << QUrl::fromLocalFile(info.path);
+        paths << info.path;
+    }
+    if (urls.isEmpty()) return;
 
     auto *mime = new QMimeData;
-    mime->setText(info.path);
+    mime->setUrls(urls);
+    mime->setText(paths.join(QLatin1Char('\n')));
 
     auto *drag = new QDrag(this);
     drag->setMimeData(mime);
