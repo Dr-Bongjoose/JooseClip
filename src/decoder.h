@@ -45,7 +45,10 @@ public:
     QImage seekVideo(double t) { double pts; return frameAt(t, pts); }
 
     // --- audio ---
-    bool hasAudio() const { return audioStream_ >= 0; }
+    // True if the source has an audio stream. Probes lazily on first call
+    // if streams were never indexed yet (audio asked before any video
+    // open); result cached so repeated calls are cheap.
+    bool hasAudio();
     int sampleRate() const { return sampleRate_; }
     int channels() const { return channels_; }
 
@@ -91,6 +94,7 @@ private:
     // audio decode state — separate AVFormatContext so video seeks
     // don't clobber the audio demux position mid-playback
     int audioStream_ = -1;
+    bool audioProbed_ = false; // hasAudio() probe ran (avoid re-probing)
     AVFormatContext *afmt_ = nullptr;   // opened lazily on first audio request
     AVCodecContext *actx_ = nullptr;
     SwrContext *swr_ = nullptr;

@@ -200,12 +200,38 @@ QImage Decoder::frameAt(double t, double &ptsOut) {
 }
 // ---- audio ----------------------------------------------------------------
 
+// Lazy audio-presence probe: if streams were never indexed (audio asked
+// before any video open), index them via a throwaway demux context so the
+// FIRST audio pull doesn't skip the clip as "no audio" (which used to make
+// playback silent until the user happened to scrub video first).
+bool Decoder::hasAudio() {
+    if (audioStream_ >= 0) return true;      // already indexed (incl. by video open)
+    if (audioProbed_) return false;           // probed before: genuinely no audio
+    audioProbed_ = true;
+    AVFormatContext *tmp = nullptr;
+    if (avformat_open_input(&tmp, info_.path.toUtf8().constData(), nullptr, nullptr) < 0)
+        return false;
+    avformat_find_stream_info(tmp, nullptr);
+    for (unsigned i = 0; i < tmp->nb_streams; ++i) {
+        if (tmp->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            audioStream_ = int(i);
+            break;
+        }
+    }
+    avformat_close_input(&tmp);
+    return audioStream_ >= 0;
+}
+
 // Open a dedicated AVFormatContext for audio demuxing. The video path owns
 // fmt_ and seeks it constantly; sharing would corrupt both streams.
 // Caller must hold audioMutex_.
 bool Decoder::ensureAudioOpen() {
     // Index the streams (shared with video side; the *index* is stable).
-    if (audioStream_ < 0 && !fmt_) {
+    // NOTE: if video open ran, audioStream_ is already correct (including
+    // -1 for genuinely audio-less files); probing again would be wasted
+    // work. Only probe when nothing has indexed streams yet (audioStream_
+    // < 0 AND no format context was ever opened — i.e. audio asked first).
+    if (audioStream_ < 0 && !fmt_ && !afmt_) {
         // probe via a temporary context so we don't depend on video open
         AVFormatContext *tmp = nullptr;
         if (avformat_open_input(&tmp, info_.path.toUtf8().constData(), nullptr, nullptr) < 0)
@@ -220,6 +246,7 @@ bool Decoder::ensureAudioOpen() {
         avformat_close_input(&tmp);
         if (audioStream_ < 0) return false;
     }
+    if (audioStream_ < 0) return false; // genuinely audio-less: no streams[-1]
     if (actx_ && afmt_) return true;
 
     // dedicated demux context for audio

@@ -47,45 +47,54 @@ void AudioEngine::stop() {
 // Mix one buffer: find clips covering [playhead_, playhead_ + dur), decode
 // s16 PCM from each via the decoder, mix (saturating), advance playhead by
 // the delivered duration. Runs on the QAudioSink pull thread.
+//
+// LOCK DISCIPLINE (deadlock fix): the sync mutex is held ONLY to snapshot
+// active clip PODs (path + local time). Decoder lookup and decode happen
+// with NO lock held: sharedDecoderFor() locks internally on registry miss,
+// and holding the sync lock across that call self-deadlocked (the freeze
+// bug: audio thread held audioSync_, lookup re-locked it, GUI then blocked
+// on the same mutex forever). Decoder decode paths have their own
+// per-stream mutexes, so concurrent use is safe.
 void AudioEngine::fill(int16_t *dst, int frames) {
-    const int outRate = sink_->format().sampleRate();
-    const int outCh = sink_->format().channelCount();
+    int outRate = 48000;
+    int outCh = 2;
+    if (sink_) {
+        outRate = sink_->format().sampleRate();
+        outCh = sink_->format().channelCount();
+    }
     std::memset(dst, 0, size_t(frames) * outCh * sizeof(int16_t));
     if (!playing_ || !lookup_) return;
 
-    const double t0 = playhead_;
+    const double t0 = playhead_; // ours; GUI only reads for the clock
     const double t1 = t0 + double(frames) / outRate;
 
-    // The timeline vectors and decoder registry are GUI-thread state.
-    // Hold the sync mutex for the whole pull (decoding is the bulk of the
-    // work, but contention is bounded: GUI only locks during edits/renders
-    // that touch the same objects).
-    std::unique_lock<std::mutex> lock;
-    if (syncMutex_) lock = std::unique_lock<std::mutex>(*syncMutex_);
-
-    static thread_local std::vector<int16_t> pcm;
-    std::vector<const Clip *> active; // clips covering the buffer
-    for (const QVector<Clip> *tr : {v1_, v2_}) {
-        if (!tr) continue;
-        for (const Clip &c : *tr) {
-            if (c.timelineStart >= t1) continue;               // starts after buffer ends
-            if (c.timelineStart + c.duration <= t0) continue;  // ends before buffer starts
-            active.push_back(&c);
+    // Snapshot active clips (POD copies) under the lock — nothing else.
+    struct Snap { QString path; double local; };
+    std::vector<Snap> snaps;
+    {
+        std::unique_lock<std::mutex> lock;
+        if (syncMutex_) lock = std::unique_lock<std::mutex>(*syncMutex_);
+        for (const QVector<Clip> *tr : {v1_, v2_}) {
+            if (!tr) continue;
+            for (const Clip &c : *tr) {
+                if (c.timelineStart >= t1) continue;               // starts after buffer ends
+                if (c.timelineStart + c.duration <= t0) continue;  // ends before buffer starts
+                snaps.push_back({c.path,
+                                 qMax(0.0, t0 - c.timelineStart + c.sourceIn)});
+            }
         }
     }
+    // ---- sync lock released; everything below runs lock-free ----
 
-    for (const Clip *cp : active) {
-        const Clip &c = *cp;
-        // Clip may start/end mid-buffer; decodeAudio handles clamping via
-        // [from, from+maxSec) with from possibly beyond file duration.
-        double local = qMax(0.0, t0 - c.timelineStart + c.sourceIn);
-        double maxSec = double(frames) / outRate;
+    static thread_local std::vector<int16_t> pcm;
+    const double maxSec = double(frames) / outRate;
 
-        Decoder *dec = lookup_(c.path);
+    for (const Snap &sn : snaps) {
+        std::shared_ptr<Decoder> dec = lookup_(sn.path); // locks internally; we hold nothing
         if (!dec || !dec->hasAudio()) continue;
 
         pcm.clear();
-        int64_t got = dec->decodeAudio(local, maxSec, pcm);
+        int64_t got = dec->decodeAudio(sn.local, maxSec, pcm);
         if (got <= 0) continue;
 
         // mix: nearest-sample resample if device rate differs
@@ -116,4 +125,14 @@ qint64 AudioEngine::writeData(char *data, qint64 len) {
     // returning less than len makes QAudioSink think we're starving; hand
     // back the whole buffer (fill() zero-pads when no clip covers playhead)
     return len;
+}
+
+// Test hook: one synchronous pull without a sink. fill() reads playing_;
+// force it for the pull so the decode path actually runs headless.
+int AudioEngine::testPull(int16_t *dst, int frames) {
+    const bool was = playing_;
+    playing_ = true;
+    fill(dst, frames);
+    playing_ = was;
+    return frames;
 }

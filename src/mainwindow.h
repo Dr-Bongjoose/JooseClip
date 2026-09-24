@@ -6,6 +6,9 @@
 #include <QLabel>
 #include <QHash>
 #include <QCloseEvent>
+#include <atomic>
+#include <condition_variable>
+#include <memory>
 #include <mutex>
 #include "decoder.h"
 #include "timelinewidget.h"
@@ -52,12 +55,31 @@ protected:
     void closeEvent(QCloseEvent *e) override;
 
 private:
-    void renderFrameAt(double t);
+    void renderFrameAt(double t);   // GUI: snapshot + queue async preview
+    void previewWorkerLoop();       // worker: decode + fx + post to GUI
     void tick();
-    Decoder *decoderFor(const QString &path);
+    Decoder *decoderFor(const QString &path);          // legacy GUI use (render)
+    std::shared_ptr<Decoder> sharedDecoderFor(const QString &path); // thread-safe ref
     void clearDecoders();
     double frameDuration() const; // 1/fps of the clip at playhead (fallback 1/25)
     QString timecode(double t) const; // mm:ss:ff at timeline fps
+
+    // async preview pipeline (GUI thread never decodes)
+    struct PreviewReq {
+        QString path;
+        double local = 0.0;
+        ClipEffects fx;
+        qint64 id = 0;
+        bool has = false;
+    };
+    PreviewReq previewPending_;      // latest requested frame (guarded by previewMutex_)
+    std::mutex previewMutex_;
+    std::condition_variable previewCv_;
+    bool previewActive_ = false;    // worker running (guarded by previewMutex_)
+    std::atomic<bool> previewAbort_{false};
+    std::atomic<qint64> previewReqId_{0};
+    class QThread *previewThread_ = nullptr;
+    ClipEffects lastFx_;            // fx of the last delivered frame
 
     TimelineWidget *timeline_;
     QLabel *monitor_;
@@ -70,12 +92,13 @@ private:
     int pendingProxies_ = 0;         // imports awaiting a proxy build
     QSet<QString> queuedForProxy_;   // paths with a build in flight
     AudioEngine *audio_ = nullptr;
-    std::mutex audioSync_; // guards timeline vectors + decoder registry vs audio thread
+    std::mutex audioSync_; // guards timeline vectors vs audio thread
+    std::mutex regMutex_;  // guards the decoder registry (GUI + audio + workers)
     QByteArray defaultPanelState_; // baseline dock layout for Window > Reset
     double playingStartPlayhead_ = 0.0;
     bool playing_ = false;
     double lastFrameTime_ = -1.0;
     QString lastFramePath_;
     QImage lastImage_;
-    QHash<QString, Decoder*> decoders_;
+    QHash<QString, std::shared_ptr<Decoder>> decoders_;
 };

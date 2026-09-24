@@ -61,6 +61,7 @@ void MediaLibrary::addPath(const QString &path) {
                          .arg(info.name).arg(info.width).arg(info.height)
                          .arg(info.fps, 0, 'f', 2).arg(info.duration, 0, 'f', 2));
     infos_[item] = info;
+    emit itemDropped(); // EVERY import path triggers proxy generation
     // Poster thumbnail, generated off-thread to keep imports snappy.
     const QString p = path;
     auto *th = QThread::create([this, item, p]() {
@@ -89,7 +90,7 @@ void MediaLibrary::dropEvent(QDropEvent *e) {
         if (!p.isEmpty()) addPath(p);
     }
     e->acceptProposedAction();
-    emit itemDropped();
+    // addPath() already emits itemDropped per import; no re-emit here.
 }
 
 void MediaLibrary::startDrag(Qt::DropActions) {

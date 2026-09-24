@@ -151,7 +151,7 @@ MainWindow::MainWindow() {
     audio_ = new AudioEngine(this);
     audio_->setTimeline(&timeline_->model.v1, &timeline_->model.v2);
     audio_->setSyncMutex(&audioSync_);
-    audio_->setDecoderLookup([this](const QString &p) { return decoderFor(p); });
+    audio_->setDecoderLookup([this](const QString &p) { return sharedDecoderFor(p); });
 
     // JKL + frame stepping (Premiere-style transport)
     auto makeSeqKey = [this](const QKeySequence &ks, void (MainWindow::*slot)()) {
@@ -319,11 +319,16 @@ void MainWindow::maybeBuildProxies() {
 }
 
 Decoder *MainWindow::decoderFor(const QString &path) {
-    std::lock_guard<std::mutex> lock(audioSync_); // shared with audio thread
-    // Registry keys by SOURCE path (stable identity); the Decoder opens the
-    // proxy when a fresh one exists — that's what makes high-res sources
-    // playable in the VM. Decoder re-probes all metadata from whatever file
-    // it opens; clip timing stays driven by the source-based model.
+    return sharedDecoderFor(path).get();
+}
+
+// Thread-safe decoder registry, keyed by SOURCE path; the Decoder opens the
+// proxy when a fresh one exists. Called from the GUI thread and from the
+// audio pull thread (which holds NO sync lock when calling — see
+// AudioEngine::fill). Registry mutations are serialized by regMutex_;
+// decoders_ itself is only touched under that mutex.
+std::shared_ptr<Decoder> MainWindow::sharedDecoderFor(const QString &path) {
+    std::lock_guard<std::mutex> lock(regMutex_);
     auto it = decoders_.find(path);
     if (it != decoders_.end()) return *it;
     MediaInfo info = MediaLibrary::probe(path);
@@ -332,21 +337,23 @@ Decoder *MainWindow::decoderFor(const QString &path) {
         proxies_->hasFreshProxy(path, info.width, info.height)) {
         openInfo.path = proxies_->playbackPath(path, info.width, info.height);
     }
-    auto *dec = new Decoder(openInfo);
+    auto dec = std::make_shared<Decoder>(openInfo);
     decoders_[path] = dec;
     return dec;
 }
 
 void MainWindow::clearDecoders() {
-    std::lock_guard<std::mutex> lock(audioSync_);
-    qDeleteAll(decoders_);
-    decoders_.clear();
+    std::lock_guard<std::mutex> lock(regMutex_);
+    decoders_.clear(); // shared_ptrs: workers holding refs keep decoders alive
 }
 
 void MainWindow::renderFrameAt(double t) {
+    // GUI thread: find the clip, snapshot path/local/fx (audio thread shares
+    // the timeline vectors), and HAND OFF decode to the preview worker.
+    // The GUI thread never decodes — that was the freeze: a full-res
+    // frameAt() took 3-6s on 2880x1616 footage with no proxies.
     const Clip *clip = nullptr;
     int track = 0;
-    // shared with audio thread: copy lookup data under the sync mutex
     QString path;
     double local = 0;
     {
@@ -359,20 +366,51 @@ void MainWindow::renderFrameAt(double t) {
         path = clip->path;
         local = t - clip->timelineStart + clip->sourceIn;
     }
-    // cache: same frame -> skip decode
-    if (qAbs(local - lastFrameTime_) < 0.004 && !lastImage_.isNull() &&
-        lastFramePath_ == path) return;
-    Decoder *dec = decoderFor(path); // registry guarded by audioSync_ inside
-    double pts = 0;
-    QImage img = dec->frameAt(local, pts);
-    if (!img.isNull()) {
-        // apply the clip's color effects to the preview
-        if (!clip->fx.isIdentity()) applyEffects(img, clip->fx);
-        lastImage_ = img;
-        lastFrameTime_ = local;
-        lastFramePath_ = path;
-        monitor_->setPixmap(QPixmap::fromImage(
-            img.scaled(monitor_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+    if (!previewThread_) {
+        previewThread_ = QThread::create([this]() { previewWorkerLoop(); });
+        previewThread_->start();
+    }
+    const qint64 id = ++previewReqId_;
+    {
+        std::lock_guard<std::mutex> lock(previewMutex_);
+        previewPending_ = {path, local, clip->fx, id, true};
+    }
+    previewCv_.notify_one();
+}
+
+// Worker thread (persistent): pull the latest pending request, decode it,
+// apply fx, and post the finished QImage back to the GUI thread. Requests
+// coalesce — a burst of scrubs produces one decode, not one per event.
+// Idles on a condvar; never exits until previewAbort_ is set at shutdown.
+void MainWindow::previewWorkerLoop() {
+    for (;;) {
+        PreviewReq req;
+        {
+            std::unique_lock<std::mutex> lock(previewMutex_);
+            previewCv_.wait(lock, [this]() {
+                return previewAbort_ || previewPending_.has;
+            });
+            if (previewAbort_) return;
+            req = previewPending_;
+            previewPending_.has = false;
+        }
+        std::shared_ptr<Decoder> dec = sharedDecoderFor(req.path);
+        if (!dec) continue;
+        double pts = 0;
+        QImage img = dec->frameAt(req.local, pts);
+        if (img.isNull()) continue;
+        if (!req.fx.isIdentity()) applyEffects(img, req.fx);
+        const qint64 id = req.id;
+        const double localTime = req.local;
+        const QString srcPath = req.path;
+        QMetaObject::invokeMethod(this, [this, img, id, localTime, srcPath]() {
+            if (id < previewReqId_) return; // stale frame: user scrubbed on
+            monitor_->setPixmap(QPixmap::fromImage(
+                img.scaled(monitor_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+            lastImage_ = img;
+            lastFrameTime_ = localTime;
+            lastFramePath_ = srcPath;
+        }, Qt::QueuedConnection);
     }
 }
 
@@ -465,6 +503,10 @@ void MainWindow::redo() {
 
 void MainWindow::closeEvent(QCloseEvent *e) {
     audio_->stop();
+    // stop the preview worker before tearing down what it touches
+    previewAbort_ = true;
+    previewCv_.notify_all();
+    if (previewThread_) previewThread_->wait(2000);
     clearDecoders();
     e->accept();
 }

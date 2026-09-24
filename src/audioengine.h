@@ -7,6 +7,7 @@
 #include <QIODevice>
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include "decoder.h"
 #include "timelinewidget.h"
@@ -16,7 +17,7 @@
 class AudioEngine : public QObject {
     Q_OBJECT
 public:
-    using DecoderLookup = std::function<Decoder *(const QString &path)>;
+    using DecoderLookup = std::function<std::shared_ptr<Decoder>(const QString &path)>;
 
     explicit AudioEngine(QObject *parent = nullptr);
     ~AudioEngine() override;
@@ -49,6 +50,12 @@ private:
 
     bool ensureSink();
     void fill(int16_t *dst, int frames);
+
+public:
+    // Test hook: drive one pull synchronously without a sink (fill falls
+    // back to 48kHz stereo when no sink exists). Forces playing_ for the
+    // duration so the pull actually decodes. Returns frames pulled.
+    int testPull(int16_t *dst, int frames);
 
     QAudioSink *sink_ = nullptr;
     PullDevice *io_ = nullptr;
