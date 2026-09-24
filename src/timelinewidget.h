@@ -3,7 +3,9 @@
 #include <QImage>
 #include <QWidget>
 #include <QVector>
-#include <QElapsedTimer>
+#include <QSet>
+#include <functional>
+
 #include "decoder.h"
 #include "clipeffects.h"
 
@@ -92,6 +94,9 @@ public:
     double playhead() const { return playhead_; }
     double pxPerSec() const { return pxPerSec_; }
     void setZoomFactor(double pps) { pxPerSec_ = qBound(2.0, pps, 400.0); clampScroll(); update(); }
+    // Resolve a source path to its playback path (proxy when fresh). Set by
+    // MainWindow; strips decode through this so 4K sources read 960p proxies.
+    void setPlaybackPathResolver(std::function<QString(const QString &)> r) { pathResolver_ = std::move(r); }
     TimelineModel model;
 
 signals:
@@ -161,6 +166,7 @@ private:
     };
     QHash<QString, StripData> stripCache_;  // key: path|in|dur
     QSet<QString> pendingStrips_;
+    std::function<QString(const QString &)> pathResolver_; // source -> playback path
     static QString stripKey(const Clip &c) {
         return c.path + QLatin1Char('|') +
                QString::number(c.sourceIn, 'f', 3) + QLatin1Char('|') +

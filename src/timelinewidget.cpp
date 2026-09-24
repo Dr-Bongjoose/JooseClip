@@ -506,15 +506,19 @@ void TimelineWidget::requestStrip(const Clip &c) {
     if (stripCache_.contains(key) || pendingStrips_.contains(key)) return;
     pendingStrips_.insert(key);
 
-    const QString path = c.path;
+    const QString srcPath = c.path;
     const double in = c.sourceIn, dur = c.duration;
     const int kThumbCount = 12;   // fixed count: zoom stretches, never regenerates
     const int kPeakCount = 300;
-    auto *thread = QThread::create([this, key, path, in, dur]() {
+    // Strip generation decodes through the playback path: high-res sources
+    // read their 960p proxy, keeping seeks fast.
+    QString playPath = srcPath;
+    if (pathResolver_) playPath = pathResolver_(srcPath);
+    auto *thread = QThread::create([this, key, playPath, in, dur]() {
         Thumbnailer th;
         StripData sd;
-        sd.thumbs = th.filmstrip(path, in, dur, kThumbCount);
-        sd.peaks = th.waveformPeaks(path, in, dur, kPeakCount);
+        sd.thumbs = th.filmstrip(playPath, in, dur, kThumbCount);
+        sd.peaks = th.waveformPeaks(playPath, in, dur, kPeakCount);
         QMetaObject::invokeMethod(this, [this, key, sd]() {
             stripCache_[key] = sd;
             pendingStrips_.remove(key);

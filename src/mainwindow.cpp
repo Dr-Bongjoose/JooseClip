@@ -74,6 +74,14 @@ MainWindow::MainWindow() {
 
     // ---- Timeline ----
     timeline_ = new TimelineWidget(this);
+    // strips (filmstrip/waveform) decode through proxies when available
+    timeline_->setPlaybackPathResolver([this](const QString &p) {
+        MediaInfo info = MediaLibrary::probe(p);
+        if (proxies_ && info.hasVideo && info.width > 0 &&
+            proxies_->hasFreshProxy(p, info.width, info.height))
+            return proxies_->playbackPath(p, info.width, info.height);
+        return p;
+    });
 
     auto *center = new QWidget(this);
     auto *vlay = new QVBoxLayout(center);
