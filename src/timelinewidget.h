@@ -88,10 +88,10 @@ public:
     bool canUndo() const { return !undoStack_.isEmpty(); }
     bool canRedo() const { return !redoStack_.isEmpty(); }
 
-    void setPlayhead(double t) { playhead_ = t; update(); }
+    void setPlayhead(double t) { playhead_ = t; followPlayhead(); update(); }
     double playhead() const { return playhead_; }
     double pxPerSec() const { return pxPerSec_; }
-    void setZoomFactor(double pps) { pxPerSec_ = qBound(2.0, pps, 400.0); update(); }
+    void setZoomFactor(double pps) { pxPerSec_ = qBound(2.0, pps, 400.0); clampScroll(); update(); }
     TimelineModel model;
 
 signals:
@@ -110,6 +110,7 @@ protected:
     void dragEnterEvent(QDragEnterEvent *e) override;
     void dragMoveEvent(QDragMoveEvent *e) override;
     void dropEvent(QDropEvent *e) override;
+    void resizeEvent(QResizeEvent *e) override;
     QSize sizeHint() const override { return {800, 260}; }
 
 private:
@@ -136,10 +137,13 @@ private:
     double playhead_ = 0.0;
     double pxPerSec_ = 40.0;
     const int snapPx_ = 8;
+    double scrollX_ = 0.0;        // pixels of horizontal timeline scroll
 
     double timelineEnd() const;
     double fpsForRuler() const;
     double snapTime(double t, double ignoreStart, double ignoreEnd);
+    void clampScroll();           // keep scroll within [0, contentWidth-view]
+    void followPlayhead();        // scroll so playhead stays visible
 
     // interaction state
     double dragGrabOffset_ = 0.0; // grab point inside clip (seconds)

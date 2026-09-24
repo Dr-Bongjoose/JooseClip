@@ -34,8 +34,25 @@ int TimelineWidget::trackAt(int y) const {
     return -2;
 }
 
-double TimelineWidget::xToTime(int x) const { return double(x) / pxPerSec_; }
-int TimelineWidget::timeToX(double t) const { return int(t * pxPerSec_); }
+double TimelineWidget::xToTime(int x) const { return double(x + scrollX_) / pxPerSec_; }
+int TimelineWidget::timeToX(double t) const { return int(t * pxPerSec_ - scrollX_); }
+
+void TimelineWidget::clampScroll() {
+    double content = qMax(0.0, timelineEnd() * pxPerSec_ + 200.0);
+    scrollX_ = qBound(0.0, scrollX_, qMax(0.0, content - width()));
+}
+
+void TimelineWidget::followPlayhead() {
+    int px = timeToX(playhead_);
+    if (px < 40) scrollX_ = qMax(0.0, playhead_ * pxPerSec_ - 40);
+    else if (px > width() - 40) scrollX_ += (px - (width() - 40));
+    clampScroll();
+}
+
+void TimelineWidget::resizeEvent(QResizeEvent *e) {
+    QWidget::resizeEvent(e);
+    clampScroll();
+}
 
 double TimelineWidget::timelineEnd() const { return model.sequenceEnd(); }
 
@@ -348,9 +365,18 @@ void TimelineWidget::wheelEvent(QWheelEvent *e) {
         // zoom centered on playhead (v0.1 keeps left-anchored view)
         double factor = e->angleDelta().y() > 0 ? 1.25 : 0.8;
         pxPerSec_ = qBound(2.0, pxPerSec_ * factor, 400.0);
+        clampScroll();
+        update();
+    } else if (e->angleDelta().x() != 0) {
+        scrollX_ = qMax(0.0, scrollX_ - e->angleDelta().x());
+        clampScroll();
         update();
     } else {
-        e->ignore();
+        // plain vertical wheel: scroll the timeline horizontally (common
+        // in NLEs where the timeline fills the panel height)
+        scrollX_ = qMax(0.0, scrollX_ - e->angleDelta().y());
+        clampScroll();
+        update();
     }
 }
 
