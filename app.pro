@@ -16,8 +16,7 @@ SOURCES += \
     src/proxymanager.cpp \
     src/thumbnailer.cpp \
     src/propertiespanel.cpp \
-    src/exportdialog.cpp \
-    src/exporter.cpp
+    src/exportdialog.cpp
 
 HEADERS += \
     src/decoder.h \
@@ -31,8 +30,7 @@ HEADERS += \
     src/proxymanager.h \
     src/thumbnailer.h \
     src/propertiespanel.h \
-    src/exportdialog.h \
-    src/exporter.h
+    src/exportdialog.h
 
 # FFmpeg (C API — the "C" part you'd have written by hand)
 CONFIG += link_pkgconfig

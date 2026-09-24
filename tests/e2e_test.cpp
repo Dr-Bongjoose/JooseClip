@@ -89,9 +89,8 @@ int main(int argc, char **argv) {
     check(tl.undo(), "undo restores 2-clip state");
     check(tl.model.v1.size() == 2, "undo verified");
 
-    // 7. export through the (currently stubbed) exporter — verifies the
-    //    dialog->exporter contract doesn't crash; real encode lands with
-    //    the agent/exporter merge.
+    // 7. real export: the timeline we just assembled (2 x 10s clips from
+    //    the security footage) rendered to MP4 through the app's Exporter.
     TimelineModel model;
     model.v1 = tl.model.v1;
     Exporter ex;
@@ -99,7 +98,9 @@ int main(int argc, char **argv) {
     s.outPath = "/tmp/e2e_export_test.mp4";
     s.width = 1280; s.height = 720; s.fps = 30;
     bool ran = ex.run(model, s);
-    std::printf("  (exporter stub ran=%d — real impl lands via agent/exporter)\n", int(ran));
+    check(ran, "export: timeline rendered to MP4");
+    QFileInfo fi(s.outPath);
+    check(fi.exists() && fi.size() > 100000, "export: output file exists and is non-trivial");
 
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
