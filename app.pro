@@ -12,7 +12,8 @@ SOURCES += \
     src/audioengine.cpp \
     src/clipeffects.cpp \
     src/theme.cpp \
-    src/proxymanager.cpp
+    src/proxymanager.cpp \
+    src/thumbnailer.cpp
 
 HEADERS += \
     src/decoder.h \
@@ -22,7 +23,8 @@ HEADERS += \
     src/audioengine.h \
     src/clipeffects.h \
     src/theme.h \
-    src/proxymanager.h
+    src/proxymanager.h \
+    src/thumbnailer.h
 
 # FFmpeg (C API — the "C" part you'd have written by hand)
 CONFIG += link_pkgconfig
