@@ -479,13 +479,12 @@ void MainWindow::importFolder() {
     if (!bin) return;
     QString dir = QFileDialog::getExistingDirectory(this, tr("Import Folder"));
     if (dir.isEmpty()) return;
-    QStringList exts = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".mp3", ".wav", ".m4a", ".flac", ".aac"};
+    QStringList exts = {"mp4", "mov", "mkv", "avi", "webm", "mp3", "wav", "m4a", "flac", "aac"};
     int n = 0;
     QDir d(dir);
     const auto entries = d.entryInfoList(QDir::Files, QDir::Name);
     for (const QFileInfo &fi : entries) {
-        if (exts.contains(fi.suffix().toLower(), Qt::CaseInsensitive) ||
-            exts.contains("." + fi.suffix().toLower())) {
+        if (exts.contains(fi.suffix().toLower())) {
             bin->addPath(fi.absoluteFilePath());
             ++n;
         }
