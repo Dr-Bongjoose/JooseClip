@@ -4,3 +4,4 @@ moc_*.cpp
 Makefile*
 .qmake.stash
 smoketest
+moc_predefs.h
