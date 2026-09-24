@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "medialibrary.h"
+#include "clipeffects.h"
 
 #include <QMenuBar>
 #include <QDockWidget>
@@ -15,6 +16,8 @@
 #include <QFileDialog>
 #include <QFile>
 #include <QStandardPaths>
+#include <QDir>
+#include <QThread>
 #include <algorithm>
 
 MainWindow::MainWindow() {
@@ -47,8 +50,13 @@ MainWindow::MainWindow() {
     // ---- Menus ----
     QMenu *fileMenu = menuBar()->addMenu(tr("&File"));
     fileMenu->addAction(tr("&Import Media…"), QKeySequence::Open, this, &MainWindow::importMedia);
+    QAction *folderAct = fileMenu->addAction(tr("Import F&older…"), this, &MainWindow::importFolder);
+    folderAct->setShortcut(QKeySequence("Ctrl+Shift+I"));
     fileMenu->addAction(tr("&Save Project"), QKeySequence::Save, this, &MainWindow::saveProject);
     fileMenu->addAction(tr("&Open Project"), QKeySequence("Ctrl+O"), this, &MainWindow::openProject);
+    fileMenu->addSeparator();
+    QAction *exportAct = fileMenu->addAction(tr("&Export…"), this, &MainWindow::showExportDialog);
+    exportAct->setShortcut(QKeySequence("Ctrl+M"));
     fileMenu->addSeparator();
     fileMenu->addAction(tr("E&xit"), QKeySequence::Quit, qApp, &QCoreApplication::quit);
 
@@ -90,6 +98,25 @@ MainWindow::MainWindow() {
     audio_->setTimeline(&timeline_->model.v1, &timeline_->model.v2);
     audio_->setSyncMutex(&audioSync_);
     audio_->setDecoderLookup([this](const QString &p) { return decoderFor(p); });
+
+    // JKL + frame stepping (Premiere-style transport)
+    auto makeSeqKey = [this](const QKeySequence &ks, void (MainWindow::*slot)()) {
+        auto *s = new QShortcut(ks, this);
+        connect(s, &QShortcut::activated, this, slot);
+        s->setAutoRepeat(false);
+        return s;
+    };
+    makeSeqKey(Qt::Key_J, &MainWindow::shuttleBackward);
+    makeSeqKey(Qt::Key_L, &MainWindow::shuttleForward);
+    // frame step: auto-repeat OK
+    {
+        auto *s = new QShortcut(QKeySequence(Qt::Key_Right), this);
+        connect(s, &QShortcut::activated, this, &MainWindow::stepForward);
+    }
+    {
+        auto *s = new QShortcut(QKeySequence(Qt::Key_Left), this);
+        connect(s, &QShortcut::activated, this, &MainWindow::stepBackward);
+    }
 
     // Premiere-style shortcuts.
     // NOTE: keys already attached to menu actions above (C, PgUp, PgDown,
@@ -236,6 +263,8 @@ void MainWindow::renderFrameAt(double t) {
     double pts = 0;
     QImage img = dec->frameAt(local, pts);
     if (!img.isNull()) {
+        // apply the clip's color effects to the preview
+        if (!clip->fx.isIdentity()) applyEffects(img, clip->fx);
         lastImage_ = img;
         lastFrameTime_ = local;
         lastFramePath_ = path;
@@ -342,3 +371,63 @@ void MainWindow::zoomStep(double f) {
     // for v0.1 we change zoom by re-setting it through a friend-ish call
     timeline_->setZoomFactor(timeline_->pxPerSec() * f);
 }
+
+double MainWindow::frameDuration() const {
+    const Clip *c = nullptr;
+    int track = 0;
+    if (timeline_->model.clipAt(timeline_->playhead(), &c, &track) && c && c->info.fps > 0)
+        return 1.0 / c->info.fps;
+    return 1.0 / 25.0;
+}
+
+void MainWindow::stepForward() {
+    if (playing_) togglePlay(); // pause before frame-stepping
+    double t = timeline_->playhead() + frameDuration();
+    timeline_->setPlayhead(t);
+    onPlayheadMoved(t);
+}
+
+void MainWindow::stepBackward() {
+    if (playing_) togglePlay();
+    double t = qMax(0.0, timeline_->playhead() - frameDuration());
+    timeline_->setPlayhead(t);
+    onPlayheadMoved(t);
+}
+
+void MainWindow::shuttleBackward() {
+    // J: reverse. v0.2 semantics: pause, then step back a frame.
+    if (playing_) togglePlay();
+    stepBackward();
+}
+
+void MainWindow::shuttleForward() {
+    // L: fast forward. v0.2 semantics: pause, then step forward.
+    if (playing_) togglePlay();
+    stepForward();
+}
+
+void MainWindow::importFolder() {
+    auto *bin = findChild<MediaLibrary*>();
+    if (!bin) return;
+    QString dir = QFileDialog::getExistingDirectory(this, tr("Import Folder"));
+    if (dir.isEmpty()) return;
+    QStringList exts = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".mp3", ".wav", ".m4a", ".flac", ".aac"};
+    int n = 0;
+    QDir d(dir);
+    const auto entries = d.entryInfoList(QDir::Files, QDir::Name);
+    for (const QFileInfo &fi : entries) {
+        if (exts.contains(fi.suffix().toLower(), Qt::CaseInsensitive) ||
+            exts.contains("." + fi.suffix().toLower())) {
+            bin->addPath(fi.absoluteFilePath());
+            ++n;
+        }
+    }
+    statusBar()->showMessage(tr("Imported %1 file(s) from folder.").arg(n), 3000);
+}
+
+void MainWindow::showExportDialog() {
+    // Placeholder until the Exporter module lands; wiring comes with the merge.
+    statusBar()->showMessage(tr("Export module integration pending."), 3000);
+}
+
+void MainWindow::cancelExport() {}

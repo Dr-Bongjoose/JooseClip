@@ -89,14 +89,14 @@ bool TimelineWidget::redo() {
 
 void TimelineWidget::paintEvent(QPaintEvent *) {
     QPainter p(this);
-    p.fillRect(rect(), QColor(0x10, 0x10, 0x12));
+    p.fillRect(rect(), Theme::bg());
 
     // Ruler
-    p.fillRect(0, 0, width(), kRulerH, kRulerColor);
+    p.fillRect(0, 0, width(), kRulerH, Theme::ruler());
     double step = 1.0;
     // pick tick spacing so labels don't overlap
     while (step * pxPerSec_ < 70) step *= (step < 1 ? 5 : 2);
-    p.setPen(QColor(0x90, 0x90, 0x90));
+    p.setPen(Theme::text());
     QFont f = p.font();
     f.setPixelSize(10);
     p.setFont(f);
@@ -117,8 +117,7 @@ void TimelineWidget::paintEvent(QPaintEvent *) {
     // Tracks: V2 row then V1 row
     for (int ti = 1; ti >= 0; --ti) {
         int y = kRulerH + (ti == 0 ? kTrackH : 0);
-        QColor bg = (ti == 1) ? QColor(0x14, 0x1a, 0x14) : QColor(0x12, 0x14, 0x1a);
-        p.fillRect(0, y, width(), kTrackH, bg);
+        p.fillRect(0, y, width(), kTrackH, Theme::surface());
         const QVector<Clip> &track = ti ? model.v2 : model.v1;
         for (int ci = 0; ci < track.size(); ++ci) {
             const Clip &c = track[ci];
@@ -141,17 +140,17 @@ void TimelineWidget::paintEvent(QPaintEvent *) {
     }
 
     // Track labels
-    p.setPen(QColor(0x77, 0x88, 0x99));
+    p.setPen(Theme::dim());
     p.drawText(4, kRulerH + 14, "V2");
     p.drawText(4, kRulerH + kTrackH + 14, "V1");
 
-    // Playhead
+    // Playhead (Premiere uses blue; JooseClip uses the JooseBooks gold)
     int px = timeToX(playhead_);
-    p.setPen(QPen(QColor(0xff, 0x50, 0x50), 2));
+    p.setPen(QPen(Theme::gold(), 2));
     p.drawLine(px, 0, px, kRulerH + 2 * kTrackH);
     QPolygon tri;
     tri << QPoint(px - 6, 0) << QPoint(px + 6, 0) << QPoint(px, 10);
-    p.setBrush(Qt::red);
+    p.setBrush(Theme::gold());
     p.setPen(Qt::NoPen);
     p.drawPolygon(tri);
 }

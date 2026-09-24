@@ -20,6 +20,7 @@ public:
 
 private slots:
     void importMedia();
+    void importFolder();
     void openProject();
     void saveProject();
     void onPlayheadMoved(double t);
@@ -33,6 +34,12 @@ private slots:
     void zoomIn()  { zoomStep(1.3); }
     void zoomOut() { zoomStep(1.0 / 1.3); }
     void zoomStep(double f);
+    void stepForward();   // one frame right (Premiere: Right / Shift+Right)
+    void stepBackward();  // one frame left
+    void shuttleBackward();  // J: play reverse (v0.2: step back at 2x tick)
+    void shuttleForward();   // L: play faster forward (v0.2: 2x tick rate)
+    void showExportDialog();
+    void cancelExport();
 
 protected:
     void closeEvent(QCloseEvent *e) override;
@@ -42,6 +49,7 @@ private:
     void tick();
     Decoder *decoderFor(const QString &path);
     void clearDecoders();
+    double frameDuration() const; // 1/fps of the clip at playhead (fallback 1/25)
 
     TimelineWidget *timeline_;
     QLabel *monitor_;
