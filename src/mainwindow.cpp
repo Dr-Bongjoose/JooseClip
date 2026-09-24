@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "medialibrary.h"
 #include "clipeffects.h"
+#include "proxymanager.h"
 
 #include <QMenuBar>
 #include <QDockWidget>
@@ -110,6 +111,14 @@ MainWindow::MainWindow() {
     // ---- Connections ----
     connect(timeline_, &TimelineWidget::playheadMoved, this, &MainWindow::onPlayheadMoved);
     connect(bin, &MediaLibrary::itemDropped, this, [this]() { statusBar()->showMessage(tr("Imported."), 2000); });
+
+    // ---- Proxy pipeline: build 960p proxies off-thread on import ----
+    proxies_ = new ProxyManager(this);
+    connect(bin, &MediaLibrary::itemDropped, this, &MainWindow::maybeBuildProxies);
+    connect(bin, &MediaLibrary::itemDropped, this, [this]() {
+        if (pendingProxies_ > 0)
+            statusBar()->showMessage(tr("Building playback proxies… %1 queued").arg(pendingProxies_), 3000);
+    });
 
     playTimer_.setInterval(33); // ~30fps preview
     connect(&playTimer_, &QTimer::timeout, this, &MainWindow::tick);
@@ -249,12 +258,57 @@ void MainWindow::onPlayheadMoved(double t) {
     updateTransportBar();
 }
 
+void MainWindow::maybeBuildProxies() {
+    auto *bin = findChild<MediaLibrary*>();
+    if (!bin || !proxies_) return;
+    // Collect un-proxied video files from the bin
+    QStringList queue;
+    for (int i = 0; i < bin->count(); ++i) {
+        QListWidgetItem *item = bin->item(i);
+        MediaInfo info = bin->infoFor(item);
+        if (!info.hasVideo || info.width <= 0) continue;
+        if (proxies_->hasFreshProxy(info.path, info.width, info.height)) continue;
+        if (queuedForProxy_.contains(info.path)) continue;
+        queue << info.path;
+        queuedForProxy_.insert(info.path);
+    }
+    if (queue.isEmpty()) return;
+    pendingProxies_ += queue.size();
+
+    // One worker thread per import batch; ProxyManager::build() blocks there.
+    const QStringList paths = queue;
+    auto *thread = QThread::create([this, paths]() {
+        for (const QString &p : paths) {
+            MediaInfo info = MediaLibrary::probe(p);
+            if (!info.hasVideo || info.width <= 0) continue;
+            proxies_->build(p, info.width, info.height);
+        }
+    });
+    connect(thread, &QThread::finished, this, [this, paths]() {
+        pendingProxies_ = qMax(0, pendingProxies_ - paths.size());
+        for (const QString &p : paths) queuedForProxy_.remove(p);
+        // decoders may now resolve to proxies: drop stale full-res ones
+        clearDecoders();
+        statusBar()->showMessage(tr("Playback proxies ready."), 3000);
+    });
+    thread->start();
+}
+
 Decoder *MainWindow::decoderFor(const QString &path) {
     std::lock_guard<std::mutex> lock(audioSync_); // shared with audio thread
+    // Registry keys by SOURCE path (stable identity); the Decoder opens the
+    // proxy when a fresh one exists — that's what makes high-res sources
+    // playable in the VM. Decoder re-probes all metadata from whatever file
+    // it opens; clip timing stays driven by the source-based model.
     auto it = decoders_.find(path);
     if (it != decoders_.end()) return *it;
     MediaInfo info = MediaLibrary::probe(path);
-    auto *dec = new Decoder(info);
+    MediaInfo openInfo = info;
+    if (proxies_ && info.hasVideo && info.width > 0 &&
+        proxies_->hasFreshProxy(path, info.width, info.height)) {
+        openInfo.path = proxies_->playbackPath(path, info.width, info.height);
+    }
+    auto *dec = new Decoder(openInfo);
     decoders_[path] = dec;
     return dec;
 }

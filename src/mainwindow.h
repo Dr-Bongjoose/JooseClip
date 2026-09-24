@@ -10,8 +10,10 @@
 #include "decoder.h"
 #include "timelinewidget.h"
 #include "audioengine.h"
+#include "proxymanager.h"
 
 class QSlider;
+class QThread;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -44,6 +46,7 @@ private slots:
     void showExportDialog();
     void cancelExport();
     void updateTransportBar();
+    void maybeBuildProxies();  // scan bin for un-proxied media, queue builds
 
 protected:
     void closeEvent(QCloseEvent *e) override;
@@ -62,6 +65,10 @@ private:
     QTimer playTimer_;
     QElapsedTimer clock_;
     QLabel *tcLabel_ = nullptr;    // transport bar timecode
+    ProxyManager *proxies_ = nullptr;
+    QThread *proxyThread_ = nullptr; // worker that builds proxies off-GUI
+    int pendingProxies_ = 0;         // imports awaiting a proxy build
+    QSet<QString> queuedForProxy_;   // paths with a build in flight
     AudioEngine *audio_ = nullptr;
     std::mutex audioSync_; // guards timeline vectors + decoder registry vs audio thread
     QByteArray defaultPanelState_; // baseline dock layout for Window > Reset
