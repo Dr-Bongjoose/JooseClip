@@ -7,6 +7,9 @@
 #include <QSplitter>
 #include <QShortcut>
 #include <QVBoxLayout>
+#include <QPushButton>
+#include <QHBoxLayout>
+#include <QFont>
 #include <QApplication>
 #include <QKeyEvent>
 #include <QStatusBar>
@@ -38,12 +41,30 @@ MainWindow::MainWindow() {
     monitor_->setStyleSheet("background:#000;");
     monitor_->setMinimumSize(640, 360);
 
+    // ---- Transport bar ----
+    auto *transport = new QWidget(this);
+    auto *tlay = new QHBoxLayout(transport);
+    tlay->setContentsMargins(4, 2, 4, 2);
+    tcLabel_ = new QLabel(QStringLiteral("00:00:00 / 00:00:00"), transport);
+    QFont mono(QStringLiteral("monospace"));
+    mono.setStyleHint(QFont::TypeWriter);
+    tcLabel_->setFont(mono);
+    tcLabel_->setMinimumWidth(160);
+    auto *playBtn = new QPushButton(tr("Play"), transport);
+    playBtn->setFixedWidth(90);
+    connect(playBtn, &QPushButton::clicked, this, &MainWindow::togglePlay);
+    tlay->addWidget(tcLabel_);
+    tlay->addStretch(1);
+    tlay->addWidget(playBtn);
+
     // ---- Timeline ----
     timeline_ = new TimelineWidget(this);
 
     auto *center = new QWidget(this);
     auto *vlay = new QVBoxLayout(center);
+    vlay->setContentsMargins(0, 0, 0, 0);
     vlay->addWidget(monitor_, 3);
+    vlay->addWidget(transport);
     vlay->addWidget(timeline_, 2);
     setCentralWidget(center);
 
@@ -108,6 +129,9 @@ MainWindow::MainWindow() {
     };
     makeSeqKey(Qt::Key_J, &MainWindow::shuttleBackward);
     makeSeqKey(Qt::Key_L, &MainWindow::shuttleForward);
+    makeSeqKey(Qt::Key_Home, &MainWindow::goStart);
+    makeSeqKey(Qt::Key_End, &MainWindow::goEnd);
+    makeSeqKey(QKeySequence("\\"), &MainWindow::fitZoom);
     // frame step: auto-repeat OK
     {
         auto *s = new QShortcut(QKeySequence(Qt::Key_Right), this);
@@ -222,6 +246,7 @@ void MainWindow::openProject() {
 
 void MainWindow::onPlayheadMoved(double t) {
     renderFrameAt(t);
+    updateTransportBar();
 }
 
 Decoder *MainWindow::decoderFor(const QString &path) {
@@ -404,6 +429,49 @@ void MainWindow::shuttleForward() {
     // L: fast forward. v0.2 semantics: pause, then step forward.
     if (playing_) togglePlay();
     stepForward();
+}
+
+void MainWindow::goStart() {
+    if (playing_) togglePlay();
+    timeline_->setPlayhead(0.0);
+    onPlayheadMoved(0.0);
+}
+
+void MainWindow::goEnd() {
+    if (playing_) togglePlay();
+    double end = timeline_->model.sequenceEnd();
+    timeline_->setPlayhead(end);
+    onPlayheadMoved(end);
+}
+
+void MainWindow::fitZoom() {
+    double end = timeline_->model.sequenceEnd();
+    if (end <= 0) return;
+    double pps = (double(timeline_->width()) - 80.0) / end;
+    timeline_->setZoomFactor(qMax(2.0, pps));
+}
+
+QString MainWindow::timecode(double t) const {
+    double fps = 25.0;
+    const Clip *c = nullptr;
+    int track = 0;
+    if (timeline_->model.clipAt(t, &c, &track) && c && c->info.fps > 0)
+        fps = c->info.fps;
+    int totalFrames = int(t * fps + 0.5);
+    int frames = totalFrames % int(fps);
+    int secs = int(t);
+    int mins = secs / 60;
+    secs %= 60;
+    return QString("%1:%2:%3")
+        .arg(mins, 2, 10, QChar('0'))
+        .arg(secs, 2, 10, QChar('0'))
+        .arg(frames, 2, 10, QChar('0'));
+}
+
+void MainWindow::updateTransportBar() {
+    if (tcLabel_)
+        tcLabel_->setText(timecode(timeline_->playhead()) +
+                          QStringLiteral(" / ") + timecode(timeline_->model.sequenceEnd()));
 }
 
 void MainWindow::importFolder() {
