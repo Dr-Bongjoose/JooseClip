@@ -39,6 +39,10 @@ while let Some(p) = d.next_packet()? {        // file order, all tracks
   `block ts + i × (BlockDuration or DefaultDuration)/n`; if neither is known, later laces repeat the
   block timestamp and have `duration == 0` (`Packet::lace` tells which).
 - **Keyframes:** SimpleBlock keyframe flag; BlockGroup = keyframe iff it has no ReferenceBlock.
+- **BlockAdditions:** the `BlockAdditional` with `BlockAddID` 1 (the default) of an unlaced
+  BlockGroup is indexed as `Sample::addition` and read with `MkvFile::read_block_additional`
+  (`Packet::block_additional` when streaming). With `AlphaMode` 1 (WebM VP9/VP8) it is a second
+  bitstream whose luma plane is the straight alpha channel; `filmcraft-codecs` decodes it.
 - **Lacing:** Xiph, fixed-size, EBML. **Unknown sizes:** Segment (live/streamed output) and
   Clusters end at the next top-level element. **CRC-32:** optional verification of level-1
   elements and clusters; mismatches go to `MkvFile::crc_errors` (not fatal). **Void** skipped.
@@ -109,7 +113,8 @@ CRC-32, Chapters, Tags, Attachments, or content encodings.
 
 - Only the first Segment is read (no linked/chained segments, no ordered-chapter editions playback).
 - zlib/bzlib/lzo compressed and encrypted tracks are detected but their frames are not decoded.
-- BlockAdditions (e.g. VP9 alpha, WebVTT settings in Matroska) are skipped; `EncryptedBlock` ignored.
+- Only `BlockAddID` 1 BlockAdditions are exposed (others, e.g. ITU-T T.35 HDR metadata, are
+  skipped), and none for laced blocks; `EncryptedBlock` ignored. The muxer does not write them.
 - `TrackTimestampScale` (deprecated) is ignored.
 - Lace timestamps without any duration information repeat the block timestamp (FFmpeg derives them
   from codec parsers).

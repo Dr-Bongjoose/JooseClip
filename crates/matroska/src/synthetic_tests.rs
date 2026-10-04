@@ -201,3 +201,68 @@ fn synthetic_file() {
     assert_eq!(d.next_packet().unwrap().unwrap().pts, 1120);
     assert!(d.file().indexed);
 }
+
+/// WebM VP9 with `AlphaMode` 1: the alpha bitstream rides in `BlockAdditions` (`BlockMore` with
+/// `BlockAddID` 1, the default when absent); SimpleBlocks and other IDs carry none.
+#[test]
+fn block_additions_alpha() {
+    let mut f = Vec::new();
+    let mut h = Vec::new();
+    el_str(&mut h, DOC_TYPE, "webm");
+    el(&mut f, EBML, &h);
+    let mut seg = Vec::new();
+    let mut info = Vec::new();
+    el_uint(&mut info, TIMESTAMP_SCALE, 1_000_000);
+    el(&mut seg, INFO, &info);
+    let mut v = Vec::new();
+    el_uint(&mut v, TRACK_NUMBER, 1);
+    el_uint(&mut v, TRACK_TYPE, 1);
+    el_str(&mut v, CODEC_ID, "V_VP9");
+    let mut vid = Vec::new();
+    el_uint(&mut vid, PIXEL_WIDTH, 16);
+    el_uint(&mut vid, PIXEL_HEIGHT, 16);
+    el_uint(&mut vid, ALPHA_MODE, 1);
+    el(&mut v, VIDEO, &vid);
+    let mut tr = Vec::new();
+    el(&mut tr, TRACK_ENTRY, &v);
+    el(&mut seg, TRACKS, &tr);
+    let group = |rel: i16, key: bool, data: &[u8], more: &[(Option<u64>, &[u8])]| {
+        let mut g = Vec::new();
+        el(&mut g, BLOCK, &block(1, rel, 0, data));
+        if !key {
+            el(&mut g, REFERENCE_BLOCK, &[0xD8]);
+        }
+        let mut adds = Vec::new();
+        for (id, payload) in more {
+            let mut m = Vec::new();
+            if let Some(id) = id {
+                el_uint(&mut m, BLOCK_ADD_ID, *id);
+            }
+            el(&mut m, BLOCK_ADDITIONAL, payload);
+            el(&mut adds, BLOCK_MORE, &m);
+        }
+        if !more.is_empty() {
+            el(&mut g, BLOCK_ADDITIONS, &adds);
+        }
+        g
+    };
+    let mut cl = Vec::new();
+    el_uint(&mut cl, TIMESTAMP, 0);
+    el(&mut cl, BLOCK_GROUP, &group(0, true, &[1, 1], &[(Some(1), &[0xA1, 0xA1, 0xA1])]));
+    el(&mut cl, BLOCK_GROUP, &group(40, false, &[2], &[(Some(4), &[9]), (None, &[0xA2])]));
+    el(&mut cl, SIMPLE_BLOCK, &block(1, 80, 0, &[3]));
+    el(&mut cl, BLOCK_GROUP, &group(120, false, &[4], &[(Some(2), &[9])]));
+    el(&mut seg, CLUSTER, &cl);
+    el(&mut f, SEGMENT, &seg);
+
+    let file = open_with(&f[..], &OpenOptions::default()).unwrap();
+    let t = &file.tracks[0];
+    assert_eq!(t.video.as_ref().unwrap().alpha_mode, 1);
+    assert_eq!(t.samples.len(), 4);
+    let adds: Vec<Option<Vec<u8>>> = (0..4).map(|i| file.read_block_additional(&f[..], 0, i).unwrap()).collect();
+    assert_eq!(adds, vec![Some(vec![0xA1; 3]), Some(vec![0xA2]), None, None]);
+    assert_eq!(file.read_sample(&f[..], 0, 0).unwrap(), [1, 1]);
+    let p: Vec<Packet> = Demuxer::from_slice(&f).unwrap().map(|p| p.unwrap()).collect();
+    assert_eq!(p.iter().map(|p| p.block_additional.clone()).collect::<Vec<_>>(), adds);
+    assert_eq!(p.iter().map(|p| p.data.clone()).collect::<Vec<_>>(), vec![vec![1, 1], vec![2], vec![3], vec![4]]);
+}

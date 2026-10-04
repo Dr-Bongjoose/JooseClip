@@ -91,7 +91,8 @@ pub struct VideoInfo {
     /// `FieldOrder` (0 progressive, 1 tff, 2 undetermined, 6 bff, 9/14 interleaved).
     pub field_order: Option<u64>,
     pub stereo_mode: Option<u64>,
-    /// `AlphaMode`: 1 if BlockAdditions carry alpha.
+    /// `AlphaMode`: 1 if BlockAdditions (`BlockAddID` 1) carry alpha: for VP9/VP8, a second
+    /// bitstream of the same codec whose luma plane is the (straight) alpha channel.
     pub alpha_mode: u64,
     /// `ColourSpace` FourCC (uncompressed video).
     pub colour_space: Option<[u8; 4]>,
@@ -166,6 +167,10 @@ pub struct Sample {
     pub block_offset: u64,
     /// Index of this frame within a laced block.
     pub lace: u16,
+    /// Absolute (offset, size) of the `BlockAdditional` with `BlockAddID` 1 of the enclosing
+    /// BlockGroup (RFC 9559 §5.1.3.5.2; for WebM VP9 with `AlphaMode` 1, the alpha bitstream).
+    /// Only set for unlaced blocks. See [`crate::MkvFile::read_block_additional`].
+    pub addition: Option<(u64, u32)>,
 }
 
 /// A Matroska track (`TrackEntry`) plus, once indexed, its sample table.

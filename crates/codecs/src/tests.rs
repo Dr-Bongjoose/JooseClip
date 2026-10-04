@@ -429,6 +429,69 @@ fn mkv_vp9_rgb() {
     }
 }
 
+/// WebM VP9 with alpha (`AlphaMode` 1, alpha stream in BlockAdditions): colour and alpha planes
+/// are sample-exact against libvpx (which decodes the alpha stream; ffmpeg's native VP9 decoder
+/// ignores it), also after seeks; frames convert to straight-alpha RGBA.
+#[test]
+fn webm_vp9_alpha_matches_libvpx() {
+    let name = "alpha_vp9.webm";
+    let frames = 40usize;
+    let n = frames.to_string();
+    let args = [
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=s=176x144:r=25,format=yuva420p,geq=lum='p(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='mod(X*3+Y+N*7,256)'",
+        "-frames:v",
+        &n,
+        "-c:v",
+        "libvpx-vp9",
+        "-pix_fmt",
+        "yuva420p",
+        "-g",
+        "16",
+        "-b:v",
+        "400k",
+        "-deadline",
+        "realtime",
+        "-speed",
+        "8",
+    ];
+    let Some(path) = fixture_path(name, &args) else { return };
+    let p = path.to_str().unwrap();
+    let Some(reference) =
+        fixture("alpha_vp9.webm.libvpx.yuva420p", &["-c:v", "libvpx-vp9", "-i", p, "-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "yuva420p"])
+    else {
+        return;
+    };
+    let bytes: Arc<[u8]> = std::fs::read(&path).unwrap().into();
+    let src = crate::open_bytes(name, bytes).unwrap();
+    let info = src.info().clone();
+    assert_eq!(info.container, "WebM");
+    let v = info.video.as_ref().unwrap();
+    assert!(v.has_alpha);
+    let (w, h) = (176usize, 144usize);
+    let frame_len = w * h * 5 / 2;
+    assert_eq!(reference.len(), frame_len * frames);
+    let rate = info.frame_rate();
+    let order: Vec<usize> = [frames - 1, 3, 20, 17, 16, 0, 8].into_iter().chain(25..32).collect();
+    let mut translucent = 0;
+    for k in order {
+        let f = src.video_frame(FrameRequest::full(rate.tick_of(k as i64))).unwrap();
+        let filmcraft_frame::PixelData::Yuv8 { planes, alpha, .. } = &f.data else { panic!("not 8-bit YUV: {}", f.format_label()) };
+        let r = &reference[k * frame_len..(k + 1) * frame_len];
+        let colour: Vec<u8> = planes.iter().flat_map(|p| p.iter().copied()).collect();
+        assert!(colour == r[..w * h * 3 / 2], "frame {k}: colour differs from libvpx");
+        let a = alpha.as_ref().unwrap_or_else(|| panic!("frame {k}: no alpha plane"));
+        assert!(a[..] == r[w * h * 3 / 2..], "frame {k}: alpha differs from libvpx");
+        // straight alpha survives conversion to RGBA
+        let px = f.to_rgba8();
+        assert!(px.chunks_exact(4).zip(a.iter()).all(|(p, a)| p[3] == *a), "frame {k}: RGBA alpha");
+        translucent += a.iter().filter(|&&v| v > 8 && v < 247).count();
+    }
+    assert!(translucent > 0, "the fixture's alpha should not be binary");
+}
+
 /// ffmpeg + libopus decode of a container fixture (pre-skip / codec delay / edit list applied) as
 /// interleaved f32 at 48 kHz: the reference for our Opus path.
 fn opus_reference(name: &str) -> Option<Vec<f32>> {

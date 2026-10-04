@@ -4,6 +4,10 @@
 //! containers (H.264, HEVC, VP9, AV1, ProRes, MJPEG). Audio: AAC and Opus
 //! via our decoders, PCM directly, MP3/FLAC/Vorbis via the bootstrap decoders.
 //!
+//! VP9 alpha (WebM `AlphaMode` 1): each block's `BlockAdditional` (`BlockAddID` 1) is a second VP9
+//! bitstream whose luma plane is the straight alpha channel. A second decoder instance decodes it
+//! alongside the colour stream ([`AlphaDecoder`]) and its luma becomes the frame's alpha plane.
+//!
 //! Opus (`A_OPUS`): `CodecPrivate` is the `OpusHead`; output is always 48 kHz. The demuxer
 //! subtracts `CodecDelay` from timestamps, so the pre-skip samples land before zero and are never
 //! read; random access decodes `SeekPreRoll` (at least [`crate::audio::OPUS_PRE_ROLL`]) of preceding
@@ -43,6 +47,8 @@ pub struct MkvSource {
     atrack: Option<usize>,
     /// Video codec as an ISO-BMFF sample entry (for the decoder factories).
     ventry: Option<SampleEntry>,
+    /// VP9 with `AlphaMode` 1: decode the BlockAdditions alpha stream too.
+    valpha: bool,
     video: GopCache,
     audio: Mutex<AudioState>,
     /// Audio packet start positions in source sample frames.
@@ -220,6 +226,7 @@ impl MkvSource {
         }
         let mut explicit_color = None;
         let mut ventry = None;
+        let mut valpha = false;
         let video = vtrack.map(|i| {
             let t = &file.tracks[i];
             let v = t.video.clone().unwrap_or_default();
@@ -239,6 +246,7 @@ impl MkvSource {
                 explicit_color = Some(color);
             }
             ventry = sample_entry(&t.codec, &t.codec_private, t.video.as_ref(), w as u16, h as u16);
+            valpha = v.alpha_mode == 1 && matches!(t.codec, Codec::Vp9 { .. });
             let secs = file.duration_ns().unwrap_or(0) as f64 / 1e9;
             let bitrate = (secs > 0.0).then(|| (t.samples.iter().map(|s| s.size as u64).sum::<u64>() as f64 * 8.0 / secs) as u64);
             VideoStreamInfo {
@@ -317,6 +325,7 @@ impl MkvSource {
             vtrack,
             atrack,
             ventry,
+            valpha,
             video: GopCache::new(explicit_color),
             audio: Mutex::new(AudioState { decoder: None, packets: HashMap::new(), order: Vec::new(), last_decoded: None }),
             audio_starts,
@@ -423,13 +432,183 @@ impl VideoSamples for MkvVideo<'_> {
         self.src.file.tracks[self.track].sample_at_pts(t)
     }
     fn read(&self, i: usize) -> crate::Result<Vec<u8>> {
-        self.src.read(self.track, i)
+        let main = self.src.read(self.track, i)?;
+        if !self.src.valpha {
+            return Ok(main);
+        }
+        let alpha = self.src.file.read_block_additional(&self.src.bytes, self.track, i).map_err(|e| CodecError::Container(e.to_string()))?;
+        Ok(pack_alpha(&main, alpha.as_deref()))
     }
     fn make_decoder(&self) -> crate::Result<Box<dyn VideoDecoder>> {
         match &self.src.ventry {
+            Some(e) if self.src.valpha => Ok(Box::new(AlphaDecoder::new(make_video_decoder(e)?, make_video_decoder(e)?))),
             Some(e) => make_video_decoder(e),
             None => Err(CodecError::Unsupported(format!("no decoder for {} video", codec_label(&self.src.file.tracks[self.track].codec)))),
         }
+    }
+}
+
+/// A colour sample and its alpha sample as one [`AlphaDecoder`] sample: the colour sample's length
+/// (u32 LE), the colour sample, then the alpha sample (empty: the block has no alpha).
+fn pack_alpha(main: &[u8], alpha: Option<&[u8]>) -> Vec<u8> {
+    let alpha = alpha.unwrap_or_default();
+    let mut v = Vec::with_capacity(4 + main.len() + alpha.len());
+    v.extend_from_slice(&(main.len() as u32).to_le_bytes());
+    v.extend_from_slice(main);
+    v.extend_from_slice(alpha);
+    v
+}
+
+/// The (colour, alpha) halves of a [`pack_alpha`] sample (alpha `None` when absent).
+fn unpack_alpha(sample: &[u8]) -> (&[u8], Option<&[u8]>) {
+    let Some(len) = sample.get(..4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize) else { return (sample, None) };
+    let body = &sample[4..];
+    if len > body.len() {
+        return (body, None);
+    }
+    let (main, alpha) = body.split_at(len);
+    (main, (!alpha.is_empty()).then_some(alpha))
+}
+
+/// A decoded alpha stream's luma plane, at its own bit depth.
+enum AlphaPlane {
+    U8(Arc<Vec<u8>>),
+    U16(Arc<Vec<u16>>, u32),
+}
+
+impl AlphaPlane {
+    fn of(f: &VideoFrame) -> Option<(u32, u32, AlphaPlane)> {
+        use filmcraft_frame::PixelData;
+        let p = match &f.data {
+            PixelData::Yuv8 { planes, .. } => AlphaPlane::U8(planes[0].clone()),
+            PixelData::Yuv16 { planes, bits, .. } => AlphaPlane::U16(planes[0].clone(), *bits),
+            _ => return None,
+        };
+        Some((f.width, f.height, p))
+    }
+
+    /// As 8-bit values.
+    fn to_u8(&self) -> Arc<Vec<u8>> {
+        match self {
+            AlphaPlane::U8(a) => a.clone(),
+            AlphaPlane::U16(a, bits) => {
+                let max = ((1u32 << bits) - 1).max(1);
+                Arc::new(a.iter().map(|&v| ((v as u32 * 255 + max / 2) / max).min(255) as u8).collect())
+            }
+        }
+    }
+
+    /// As `bits`-bit values.
+    fn to_u16(&self, bits: u32) -> Arc<Vec<u16>> {
+        let to = (1u32 << bits) - 1;
+        match self {
+            AlphaPlane::U16(a, b) if *b == bits => a.clone(),
+            AlphaPlane::U16(a, b) => {
+                let from = ((1u32 << b) - 1).max(1);
+                Arc::new(a.iter().map(|&v| ((v as u32 * to + from / 2) / from).min(to) as u16).collect())
+            }
+            AlphaPlane::U8(a) => Arc::new(a.iter().map(|&v| ((v as u32 * to + 127) / 255) as u16).collect()),
+        }
+    }
+}
+
+/// VP9 with a BlockAdditions alpha stream: one decoder for the colour samples, a second for the
+/// alpha samples (same codec), fed [`pack_alpha`] samples. Each output picture gets the alpha
+/// picture of the same pts as its (straight) alpha plane; a picture without one stays opaque.
+struct AlphaDecoder {
+    main: Box<dyn VideoDecoder>,
+    alpha: Box<dyn VideoDecoder>,
+    /// Decoded alpha planes by pts, waiting for their colour picture.
+    planes: std::collections::BTreeMap<i64, (u32, u32, AlphaPlane)>,
+}
+
+impl AlphaDecoder {
+    fn new(main: Box<dyn VideoDecoder>, alpha: Box<dyn VideoDecoder>) -> Self {
+        Self { main, alpha, planes: Default::default() }
+    }
+
+    fn take_alpha(&mut self, out: Vec<crate::video::DecodedFrame>) {
+        for d in out {
+            if let Some(p) = AlphaPlane::of(&d.frame) {
+                self.planes.insert(d.pts, p);
+            }
+        }
+    }
+
+    /// Attach the alpha plane decoded for each picture's pts (older unmatched planes are dropped).
+    fn attach(&mut self, out: Vec<crate::video::DecodedFrame>) -> Vec<crate::video::DecodedFrame> {
+        use filmcraft_frame::PixelData;
+        out.into_iter()
+            .map(|mut d| {
+                let plane = self.planes.remove(&d.pts);
+                self.planes = self.planes.split_off(&d.pts);
+                let Some((w, h, a)) = plane.filter(|(w, h, _)| (*w, *h) == (d.frame.width, d.frame.height)) else { return d };
+                let n = w as usize * h as usize;
+                match &mut d.frame.data {
+                    PixelData::Yuv8 { alpha, .. } => *alpha = Some(a.to_u8()),
+                    PixelData::Yuv16 { alpha, bits, .. } => *alpha = Some(a.to_u16(*bits)),
+                    PixelData::Rgba8(px) => {
+                        let a = a.to_u8();
+                        let px = Arc::make_mut(px);
+                        for (i, v) in a.iter().take(n).enumerate() {
+                            px[i * 4 + 3] = *v;
+                        }
+                    }
+                    _ => {}
+                }
+                d
+            })
+            .collect()
+    }
+}
+
+impl VideoDecoder for AlphaDecoder {
+    fn decode(&mut self, sample: &[u8], pts: i64) -> crate::Result<Vec<crate::video::DecodedFrame>> {
+        let (main, alpha) = unpack_alpha(sample);
+        if let Some(a) = alpha {
+            // a damaged alpha stream leaves the pictures opaque rather than failing them
+            if let Ok(out) = self.alpha.decode(a, pts) {
+                self.take_alpha(out);
+            }
+        }
+        let out = self.main.decode(main, pts)?;
+        Ok(self.attach(out))
+    }
+    fn flush(&mut self) -> Vec<crate::video::DecodedFrame> {
+        let a = self.alpha.flush();
+        self.take_alpha(a);
+        let out = self.main.flush();
+        let out = self.attach(out);
+        self.planes.clear();
+        out
+    }
+    fn reset(&mut self) {
+        self.main.reset();
+        self.alpha.reset();
+        self.planes.clear();
+    }
+    fn name(&self) -> &str {
+        "FilmCraft VP9 + alpha"
+    }
+    fn intra_only(&self) -> bool {
+        self.main.intra_only() && self.alpha.intra_only()
+    }
+    /// Decoding can start only where both streams can.
+    fn is_random_access(&self, sample: &[u8]) -> Option<bool> {
+        let (main, alpha) = unpack_alpha(sample);
+        let m = self.main.is_random_access(main);
+        match alpha.map(|a| self.alpha.is_random_access(a)) {
+            Some(Some(false)) => Some(false),
+            _ => m,
+        }
+    }
+    fn is_disposable(&self, sample: &[u8]) -> bool {
+        let (main, alpha) = unpack_alpha(sample);
+        self.main.is_disposable(main) && alpha.is_none_or(|a| self.alpha.is_disposable(a))
+    }
+    fn set_draft(&mut self, on: bool) {
+        self.main.set_draft(on);
+        self.alpha.set_draft(on);
     }
 }
 

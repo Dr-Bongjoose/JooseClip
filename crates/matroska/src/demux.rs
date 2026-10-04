@@ -98,6 +98,10 @@ pub struct Packet {
     /// Frame bytes with header stripping undone. Frames of tracks with other content encodings
     /// (zlib, encryption) are returned as stored; see [`Track::frames_readable`].
     pub data: Vec<u8>,
+    /// `BlockAdditional` payload with `BlockAddID` 1 from the enclosing BlockGroup's
+    /// `BlockAdditions` (unlaced blocks only): the alpha bitstream of WebM VP9 / VP8 tracks with
+    /// [`crate::VideoInfo::alpha_mode`] 1. `None` for SimpleBlocks and groups without one.
+    pub block_additional: Option<Vec<u8>>,
 }
 
 /// Result of [`Demuxer::seek`].
@@ -301,6 +305,8 @@ struct BlockRef {
     discardable: bool,
     invisible: bool,
     discard_padding: Option<i64>,
+    /// `BlockAdditional` with `BlockAddID` 1: absolute (offset, size).
+    addition: Option<(u64, u32)>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -318,6 +324,7 @@ struct FrameRef {
     discard_padding: Option<i64>,
     block_offset: u64,
     lace: u16,
+    addition: Option<(u64, u32)>,
 }
 
 fn track_lookup(tracks: &[Track]) -> impl Fn(u64) -> Option<usize> + '_ {
@@ -376,12 +383,13 @@ fn parse_block_elem<S: ByteSource + ?Sized>(
                 discardable: flags & 0x01 != 0,
                 invisible: flags & 0x08 != 0,
                 discard_padding: None,
+                addition: None,
             }))
         }
         BLOCK_GROUP => {
             let mut pos = ds;
             let mut block = None;
-            let (mut dur, mut has_ref, mut pad) = (None, false, None);
+            let (mut dur, mut has_ref, mut pad, mut addition) = (None, false, None, None);
             while pos < end {
                 let Some(c) = io.header(pos, end)? else { break };
                 let ce = c.end(end);
@@ -390,6 +398,7 @@ fn parse_block_elem<S: ByteSource + ?Sized>(
                     BLOCK_DURATION => dur = Some(ebml::uint(io.peek(c.data_start(), (ce - c.data_start()) as usize)?)),
                     REFERENCE_BLOCK => has_ref = true,
                     DISCARD_PADDING => pad = Some(ebml::int(io.peek(c.data_start(), (ce - c.data_start()) as usize)?)),
+                    BLOCK_ADDITIONS => addition = block_addition(io, c.data_start(), ce)?.or(addition),
                     _ => {}
                 }
                 pos = ce;
@@ -405,10 +414,42 @@ fn parse_block_elem<S: ByteSource + ?Sized>(
                 discardable: false,
                 invisible: flags & 0x08 != 0,
                 discard_padding: pad,
+                addition,
             }))
         }
         _ => Ok(None),
     }
+}
+
+/// The `BlockAdditional` with `BlockAddID` 1 (the default) among the `BlockMore` children of a
+/// `BlockAdditions` element spanning `start..end`, as an absolute (offset, size).
+fn block_addition<S: ByteSource + ?Sized>(io: &mut Io<'_, S>, start: u64, end: u64) -> Result<Option<(u64, u32)>> {
+    let mut pos = start;
+    while pos < end {
+        let Some(m) = io.header(pos, end)? else { break };
+        let me = m.end(end);
+        if m.id == BLOCK_MORE {
+            let (mut id, mut data) = (1u64, None);
+            let mut cp = m.data_start();
+            while cp < me {
+                let Some(c) = io.header(cp, me)? else { break };
+                let ce = c.end(me);
+                match c.id {
+                    BLOCK_ADD_ID => id = ebml::uint(io.peek(c.data_start(), (ce - c.data_start()) as usize)?),
+                    BLOCK_ADDITIONAL => data = Some((c.data_start(), (ce - c.data_start()) as u32)),
+                    _ => {}
+                }
+                cp = ce;
+            }
+            if id == 1
+                && let Some(d) = data
+            {
+                return Ok(Some(d));
+            }
+        }
+        pos = me;
+    }
+    Ok(None)
 }
 
 /// Expand a block into frames with per-lace timestamps.
@@ -450,6 +491,8 @@ fn expand(b: &BlockRef, t: &Track, scale: u64, skip: u16, out: &mut impl Extend<
             discard_padding: b.discard_padding,
             block_offset: b.block_offset,
             lace: i as u16,
+            // additions belong to the whole block: only an unlaced frame owns them unambiguously
+            addition: if n == 1 { b.addition } else { None },
         }
     }));
 }
@@ -782,6 +825,7 @@ fn add_blocks(file: &mut MkvFile, cluster: u32, blocks: &[BlockRef]) {
                 cluster,
                 block_offset: f.block_offset,
                 lace: f.lace,
+                addition: f.addition,
             });
         }
     }
@@ -838,6 +882,17 @@ impl MkvFile {
         data.resize(at + s.size as usize, 0);
         src.read_at(s.offset, &mut data[at..])?;
         Ok(data)
+    }
+
+    /// The `BlockAdditional` (`BlockAddID` 1) of sample `index` of `track`, if its block has one:
+    /// for WebM VP9 / VP8 with [`crate::VideoInfo::alpha_mode`] 1, the alpha bitstream.
+    pub fn read_block_additional<S: ByteSource + ?Sized>(&self, src: &S, track: usize, index: usize) -> Result<Option<Vec<u8>>> {
+        let t = self.tracks.get(track).ok_or(Error::NoSuchTrack(track))?;
+        let s = t.samples.get(index).ok_or(Error::NoSuchSample(index))?;
+        let Some((offset, size)) = s.addition else { return Ok(None) };
+        let mut data = vec![0; size as usize];
+        src.read_at(offset, &mut data)?;
+        Ok(Some(data))
     }
 
     /// Keyframe sample of `track` with the greatest pts ≤ `time_ns` (indexed files only).
@@ -1045,6 +1100,14 @@ impl<S: ByteSource> Demuxer<S> {
         } else {
             self.src.read_at(f.offset, &mut data[at..])?;
         }
+        let block_additional = match f.addition {
+            Some((offset, size)) => {
+                let mut a = vec![0; size as usize];
+                self.src.read_at(offset, &mut a)?;
+                Some(a)
+            }
+            None => None,
+        };
         Ok(Packet {
             track: f.track,
             track_number: t.number,
@@ -1059,6 +1122,7 @@ impl<S: ByteSource> Demuxer<S> {
             offset: f.offset,
             lace: f.lace,
             data,
+            block_additional,
         })
     }
 
