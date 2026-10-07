@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Build, sign and package FilmCraft for Windows.
+  Build, sign and package Joose Clip for Windows.
 
 .DESCRIPTION
   Produces, in $env:DIST (default: dist/release):
@@ -53,7 +53,7 @@ New-Item -ItemType Directory -Force -Path $Dist | Out-Null
 if (-not $env:FILMCRAFT_BUILD_SHA) { $env:FILMCRAFT_BUILD_SHA = (git -C $Root rev-parse HEAD 2>$null) }
 if (-not $env:FILMCRAFT_BUILD_DATE) { $env:FILMCRAFT_BUILD_DATE = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd') }
 
-Write-Output "FilmCraft $Version for Windows $Arch ($Target)"
+Write-Output "Joose Clip $Version for Windows $Arch ($Target)"
 
 if (-not $SkipBuild) {
   # Static CRT: no VC++ redistributable needed. Scoped to the target so host build scripts and
@@ -94,7 +94,7 @@ Copy-Item (Join-Path $Bin 'filmcraft.exe'), (Join-Path $Bin 'filmcraft-cli.exe')
 $Msi = Join-Path $Dist "filmcraft-$Version-windows-$Arch.msi"
 Invoke-Native 'wix build' {
   wix build (Join-Path $PSScriptRoot 'filmcraft.wxs') -arch $Arch `
-    -d "Version=$MsiVersion" -d "BinDir=$Stage" -d "IconPath=$(Join-Path $Root 'assets\app-icon\filmcraft.ico')" `
+    -d "Version=$MsiVersion" -d "BinDir=$Stage" -d "IconPath=$(Join-Path $Root 'assets\app-icon\joose-clip.ico')" `
     -o $Msi
 }
 # wix writes its debug symbols (.wixpdb) next to the MSI; keep them out of the release assets.

@@ -12,9 +12,9 @@ version_schema: semver
 release: 1
 section: video
 priority: optional
-maintainer: ${FILMCRAFT_MAINTAINER}
+maintainer: ${JOOSE_MAINTAINER}
 vendor: Learning Machines LLC
-homepage: https://getartcraft.com/apps/filmcraft
+homepage: https://jooselabs.com/joose-clip
 license: MIT OR Apache-2.0
 description: |-
   Open-source, native video editor: edit video, color and sound.

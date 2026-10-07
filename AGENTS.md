@@ -86,12 +86,14 @@ reproduce an image (for example, point lists traced from someone else's icon).
    `crates/media`, procedural looks in `crates/render`) are original work under the project licence
    and are listed in `ATTRIBUTION.md`.
 7. **When in doubt, leave it out** and draw or generate it yourself.
-8. **The one exception: first-party ArtCraft brand marks.** The ArtCraft name and logos in `docs/brand/`
-   are trademarks of the ArtCraft Team, not open source, usable only unmodified and only in the context of
-   FilmCraft under `docs/brand/LICENSE-brand.txt`; forks and modified versions must remove them. They still
-   need a sidecar and an `ATTRIBUTION.md` row (licence `LicenseRef-ArtCraft-Trademark`). No other
-   non-open asset is allowed, and this exception never covers third-party marks (Adobe, Discord, GitHub
-   and other logos stay out; draw a generic icon instead).
+8. **Fork brand rule (replaces the upstream's ArtCraft-mark exception).** This is a fork of
+   FilmCraft: the ArtCraft name and logos (upstream `docs/brand/`, licensed
+   `LicenseRef-ArtCraft-Trademark`) are trademarks of the ArtCraft Team and were **removed** from
+   this fork; they must never come back. This fork's own first-party marks — the Joose Clip icon and
+   wordmark in `assets/app-icon/` — are original work under the project licence (see
+   `assets/app-icon/JOOSE-ICON-LICENSE.txt`). No other non-open asset is allowed, and nothing here
+   covers third-party marks (Adobe, Discord, GitHub and other logos stay out; draw a generic icon
+   instead).
 9. **Fonts live in [storytold/craft-fonts](https://github.com/storytold/craft-fonts), never in this
    repo.** Don't commit new font files (the small Latin UI fonts already in `assets/fonts/` stay). A
    font FilmCraft needs is added to craft-fonts, which the app reads through the optional build input

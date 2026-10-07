@@ -1,5 +1,5 @@
 # Release pipeline: every push to `release` builds signed installers for every platform and
-# creates or updates the draft GitHub Release "FilmCraft v<version>". See docs/releasing.md.
+# creates or updates the draft GitHub Release "Joose Clip v<version>". See docs/releasing.md.
 #
 # All jobs run in the `release` environment (restricted to the `release` branch), which holds
 # the signing secrets. Every secret is optional: missing ones produce unsigned artifacts and a
@@ -58,7 +58,7 @@ jobs:
             echo "date=$(date -u +%Y-%m-%d)"
             echo "prerelease=$pre"
           } >>"$GITHUB_OUTPUT"
-          echo "### FilmCraft v$v (\`${GITHUB_SHA::9}\`)" >>"$GITHUB_STEP_SUMMARY"
+          echo "### Joose Clip v$v (\`${GITHUB_SHA::9}\`)" >>"$GITHUB_STEP_SUMMARY"
 
   macos:
     name: macOS universal
@@ -218,7 +218,7 @@ jobs:
           dpkg-deb --info dist/release/*.deb
           dpkg-deb --contents dist/release/*.deb | grep -E 'usr/bin/filmcraft$|metainfo|applications'
           ldd target/release/filmcraft
-          python3 -c "import yaml; m = yaml.safe_load(open('packaging/linux/flatpak/ai.storyteller.filmcraft.yml')); assert m['id'] == 'ai.storyteller.filmcraft'"
+          python3 -c "import yaml; m = yaml.safe_load(open('packaging/linux/flatpak/com.jooselabs.jooseclip.yml')); assert m['id'] == 'com.jooselabs.jooseclip'"
           for appimage in dist/release/*.AppImage; do
             chmod +x "$appimage"
             APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" --version
@@ -299,7 +299,7 @@ jobs:
         working-directory: artifacts
         run: |
           tag="v$VERSION"
-          title="FilmCraft v$VERSION"
+          title="Joose Clip v$VERSION"
           pre=()
           if [ "$PRERELEASE" = true ]; then pre=(--prerelease); fi
           if draft="$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null)"; then

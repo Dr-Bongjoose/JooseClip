@@ -83,8 +83,8 @@ pub struct PlaybackPrefs {
     /// a paused frame. Off by default.
     pub draft_decode: bool,
     /// "Hardware decoding": `auto` (default: the system's hardware decoder for streams it
-    /// supports, e.g. VideoToolbox H.264 / HEVC on macOS, falling back to FilmCraft's own decoder)
-    /// or `off` (always FilmCraft's own decoders). Media already open keeps its decoder until it
+    /// supports, e.g. VideoToolbox H.264 / HEVC on macOS, falling back to Joose Clip's own decoder)
+    /// or `off` (always Joose Clip's own decoders). Media already open keeps its decoder until it
     /// is reopened.
     pub hardware_decoding: String,
 }
@@ -479,10 +479,10 @@ pub fn default_data_dir() -> Option<PathBuf> {
         return Some(d);
     }
     if cfg!(target_os = "macos") {
-        return env("HOME").map(|h| h.join("Library/Application Support/FilmCraft"));
+        return env("HOME").map(|h| h.join("Library/Application Support/Joose Clip"));
     }
     if cfg!(windows) {
-        return env("APPDATA").map(|h| h.join("FilmCraft"));
+        return env("APPDATA").map(|h| h.join("Joose Clip"));
     }
     env("XDG_DATA_HOME").map(|d| d.join("filmcraft")).or_else(|| env("HOME").map(|h| h.join(".local/share/filmcraft")))
 }

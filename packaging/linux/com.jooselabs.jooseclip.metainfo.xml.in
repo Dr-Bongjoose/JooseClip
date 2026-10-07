@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata (software centres, Flathub). Template: package.sh and the Flatpak
+     manifest substitute @VERSION@ and @DATE@ from Cargo.toml and the build date. -->
+<component type="desktop-application">
+  <id>com.jooselabs.jooseclip</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <name>Joose Clip</name>
+  <summary>Edit video, color and sound</summary>
+  <developer id="com.jooselabs">
+    <name>Joose Labs</name>
+  </developer>
+  <description>
+    <p>
+      Joose Clip is a video editor. Edit video, color and sound
+    </p>
+  </description>
+  <launchable type="desktop-id">com.jooselabs.jooseclip.desktop</launchable>
+  <icon type="stock">com.jooselabs.jooseclip</icon>
+  <!-- Only url types known to appstream 0.15 (Ubuntu 22.04, where CI validates): no vcs-browser. -->
+  <url type="homepage">https://jooselabs.com/joose-clip</url>
+  <url type="bugtracker">https://github.com/JooseLabs/joose-clip/issues</url>
+  <url type="help">https://github.com/JooseLabs/joose-clip</url>
+  <url type="contact">https://jooselabs.com/</url>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Video</category>
+    <category>AudioVideoEditing</category>
+  </categories>
+  <keywords>
+    <keyword>video</keyword>
+    <keyword>video editor</keyword>
+    <keyword>timeline</keyword>
+    <keyword>color grading</keyword>
+    <keyword>nle</keyword>
+  </keywords>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Color workspace: a documentary cut with Lumetri Color, scopes, captions and loudness meters</caption>
+      <image>https://raw.githubusercontent.com/JooseLabs/joose-clip/main/docs/images/joose-clip-hero.png</image>
+    </screenshot>
+  </screenshots>
+  <branding>
+    <color type="primary" scheme_preference="light">#9fd0ff</color>
+    <color type="primary" scheme_preference="dark">#1f64ba</color>
+  </branding>
+  <requires>
+    <display_length compare="ge">760</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>tablet</control>
+  </supports>
+  <provides>
+    <binary>filmcraft</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+</component>

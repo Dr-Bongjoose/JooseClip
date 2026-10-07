@@ -79,7 +79,7 @@ fn remux(input: &Path, out_name: &str, brand: Brand, finish: Finish, timecode: O
             assert_eq!(f.read_sample(data.as_slice(), i, j).unwrap(), g.read_sample(out.as_slice(), k, j).unwrap());
         }
     }
-    assert_eq!(g.metadata.title(), Some("FilmCraft test"));
+    assert_eq!(g.metadata.title(), Some("Joose Clip test"));
     Some((f, path))
 }
 

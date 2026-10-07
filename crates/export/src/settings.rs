@@ -21,7 +21,7 @@ pub enum Scaling {
     StretchToFill,
 }
 
-/// Field order of the encoded video. FilmCraft's encoders write progressive frames.
+/// Field order of the encoded video. Joose Clip's encoders write progressive frames.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FieldOrder {
@@ -317,7 +317,7 @@ impl ExportMetadata {
                 .filter(|(_, s)| !s.trim().is_empty())
                 .map(|(k, s)| (k.to_string(), s.trim().to_string()))
                 .collect();
-        v.push(("©too".into(), format!("FilmCraft {}", env!("CARGO_PKG_VERSION"))));
+        v.push(("©too".into(), format!("Joose Clip {}", env!("CARGO_PKG_VERSION"))));
         v
     }
 }

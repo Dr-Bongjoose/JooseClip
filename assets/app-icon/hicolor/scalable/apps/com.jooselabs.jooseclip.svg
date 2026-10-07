@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <clipPath id="tile"><rect width="512" height="512" rx="112"/></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect width="512" height="512" fill="#182747"/>
+    <!-- lowercase j: tittle centered over the stem; stem right-of-center, hook sweeps left -->
+    <g transform="translate(-18,0)">
+      <!-- tittle: centered over stem centerline (stem spans x 390..462 in tile coords -> center 426; 426-64=362 in local) -->
+      <circle cx="408" cy="128" r="36" fill="#4da3ff"/>
+      <!-- stem + hook -->
+      <path d="M378 200
+               L454 200
+               L454 348
+               C454 420 396 456 318 456
+               C250 456 202 420 190 362
+               L258 346
+               C266 378 288 392 316 392
+               C348 392 378 376 378 340
+               Z"
+            fill="#eef2f7"/>
+    </g>
+    <!-- film sprocket dots along the left edge -->
+    <g fill="#7d8db0">
+      <circle cx="96" cy="96" r="11"/>
+      <circle cx="96" cy="140" r="11"/>
+      <circle cx="96" cy="184" r="11"/>
+      <circle cx="96" cy="228" r="11"/>
+      <circle cx="96" cy="272" r="11"/>
+      <circle cx="96" cy="316" r="11"/>
+      <circle cx="96" cy="360" r="11"/>
+      <circle cx="96" cy="404" r="11"/>
+    </g>
+  </g>
+</svg>

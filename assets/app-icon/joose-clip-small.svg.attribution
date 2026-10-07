@@ -1,0 +1,8 @@
+asset:        joose-clip-small.svg.attribution
+title:        Joose Clip app icon, lighter vector
+author:       Joose Labs (Joose Clip fork of FilmCraft)
+source:       original work (drawn from scratch for Joose Clip; no third-party material)
+license:      MIT OR Apache-2.0
+license-file: assets/app-icon/JOOSE-ICON-LICENSE.txt
+added:        2026-10-07 by Joose Labs (fork setup run)
+notes:        Single-path simplified variant of joose-clip.svg for small sizes.

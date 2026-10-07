@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Joose Clip
+GenericName=Video Editor
+Comment=Edit video, color and sound
+Exec=filmcraft %F
+TryExec=filmcraft
+Icon=com.jooselabs.jooseclip
+Terminal=false
+StartupNotify=true
+StartupWMClass=com.jooselabs.jooseclip
+Categories=AudioVideo;Video;AudioVideoEditing;
+Keywords=video;editor;film;timeline;color;grading;nle;

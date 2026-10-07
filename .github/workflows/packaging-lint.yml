@@ -51,7 +51,7 @@ jobs:
           if grep -oE '<Icon Id="[^"]*"' packaging/windows/filmcraft.wxs | grep -vE '\.(ico|exe)"$'; then
             echo "::error::Icon Id must end in .ico or .exe"; exit 1
           fi
-          desktop-file-validate packaging/linux/ai.storyteller.filmcraft.desktop
-          sed -e 's/@VERSION@/0.0.0/' -e 's/@DATE@/2026-01-01/' packaging/linux/ai.storyteller.filmcraft.metainfo.xml.in >"$RUNNER_TEMP/ai.storyteller.filmcraft.metainfo.xml"
-          appstreamcli validate --no-net --explain "$RUNNER_TEMP/ai.storyteller.filmcraft.metainfo.xml"
-          python3 -c "import yaml; m = yaml.safe_load(open('packaging/linux/flatpak/ai.storyteller.filmcraft.yml')); assert m['id'] == 'ai.storyteller.filmcraft' and m['command'] == 'filmcraft'"
+          desktop-file-validate packaging/linux/com.jooselabs.jooseclip.desktop
+          sed -e 's/@VERSION@/0.0.0/' -e 's/@DATE@/2026-01-01/' packaging/linux/com.jooselabs.jooseclip.metainfo.xml.in >"$RUNNER_TEMP/com.jooselabs.jooseclip.metainfo.xml"
+          appstreamcli validate --no-net --explain "$RUNNER_TEMP/com.jooselabs.jooseclip.metainfo.xml"
+          python3 -c "import yaml; m = yaml.safe_load(open('packaging/linux/flatpak/com.jooselabs.jooseclip.yml')); assert m['id'] == 'com.jooselabs.jooseclip' and m['command'] == 'filmcraft'"
