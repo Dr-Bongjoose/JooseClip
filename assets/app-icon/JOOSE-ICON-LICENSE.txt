@@ -1,5 +1,5 @@
 Joose Clip app icon (joose-clip.svg and every file derived from it in this
-directory: joose-clip-small.svg, joose-clip-1024.png, joose-clip-macos-512.png,
+directory: joose-clip-small.svg, joose-clip-1024.png, joose-clip-macos-512.png, joose-clip.icns,
 joose-clip.ico, hicolor/, and apps/filmcraft-web/web/favicon.png).
 
 Original artwork drawn from scratch for the Joose Clip fork by Joose Labs.

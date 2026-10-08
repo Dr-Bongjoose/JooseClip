@@ -1,0 +1,8 @@
+asset:        joose-clip.icns
+title:        Joose Clip app icon, macOS bundle iconset
+author:       Joose Labs (Joose Clip fork of FilmCraft)
+source:       original work (iconset generated from joose-clip-1024.png, itself rendered from joose-clip.svg)
+license:      MIT OR Apache-2.0
+license-file: assets/app-icon/JOOSE-ICON-LICENSE.txt
+added:        2026-10-07 by Joose Labs (macOS bring-up run)
+notes:        Rendered with sips + iconutil -c icns. Derived from joose-clip.svg (original Joose Labs artwork).
