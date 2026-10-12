@@ -26,6 +26,7 @@ mod audio_in;
 mod control_server;
 #[cfg(target_os = "macos")]
 mod native_menu;
+mod window_drop_types;
 mod window_raise;
 
 use args::{Cli, Launch};
@@ -182,6 +183,10 @@ fn main() -> eframe::Result {
             app.hooks.raise_without_focus = Some(Box::new(|| {
                 window_raise::raise_without_focus();
             }));
+            #[cfg(target_os = "macos")]
+            {
+                app.hooks.mac_window_drop_types = Some(Box::new(|| window_drop_types::register_types().map(|_| ())));
+            }
             app.hooks.pick_open_file = Some(Box::new(|filter: &str, exts: &[&str]| {
                 rfd::FileDialog::new().add_filter(filter, exts).pick_file().map(|p| p.to_string_lossy().to_string())
             }));
