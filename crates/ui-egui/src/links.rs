@@ -9,7 +9,7 @@ pub const APP: &str = "joose-clip";
 /// The Joose Labs community chat (placeholder until the fork has its own room).
 pub const DISCORD: &str = "https://jooselabs.com/";
 /// The fork's website.
-pub const WEBSITE: &str = "https://jooselabs.com/";
+pub const WEBSITE: &str = "https://jooselabs.com";
 /// Joose Clip's page on the Joose Labs website.
 pub const APP_PAGE: &str = "https://jooselabs.com/joose-clip";
 /// Joose Clip's source repository.
