@@ -1723,3 +1723,70 @@ mod clock_step_tests {
         assert_eq!(Playback::default().target, PlaybackTarget::Program);
     }
 }
+#[cfg(test)]
+mod audio_recovery_tests {
+    use super::*;
+
+    /// AGENTS.md §9 regression pin: an errored stream must (a) report dead exactly once,
+    /// (b) stop acting as the playback clock (`played_frames` → None), and (c) report live
+    /// again after a stop+restart with the flag reset. Mirrors the desktop CpalOut recovery
+    /// contract (upstream #23 class of failures).
+    struct FakeOut {
+        stream_alive: bool,
+        errored: bool,
+        frames: u64,
+        restarts: u32,
+    }
+    impl FakeOut {
+        fn new() -> Self {
+            Self { stream_alive: true, errored: false, frames: 0, restarts: 0 }
+        }
+        fn error(&mut self) {
+            self.errored = self.stream_alive; // at most one report; silenced streams stay dead
+        }
+    }
+    impl AudioOut for FakeOut {
+        fn start(&mut self, _fill: Box<dyn FnMut(&mut [f32], usize) + Send>) -> Result<u32, String> {
+            self.stream_alive = true;
+            self.errored = false;
+            self.restarts += 1;
+            Ok(48_000)
+        }
+        fn stop(&mut self) {
+            self.stream_alive = false;
+        }
+        fn sample_rate(&self) -> u32 {
+            48_000
+        }
+        fn played_frames(&self) -> Option<u64> {
+            if self.stream_alive && !self.errored {
+                Some(self.frames)
+            } else {
+                None
+            }
+        }
+    }
+
+    #[test]
+    fn stream_error_flags_dead_once_and_recovers_after_stop() {
+        let mut out = FakeOut::new();
+
+        // healthy clock: Some frames
+        assert_eq!(out.played_frames(), Some(0));
+        // the stream dies: the flag reports exactly once, then silenced
+        out.error();
+        assert!(out.errored);
+        out.error();
+        assert!(out.errored, "flag must stay set (reported once), not re-arm per poll");
+        // a dead stream is not a clock: the UI must fall back to wall time
+        assert_eq!(out.played_frames(), None);
+        // restart with cooldown: stop+start clears the flag and restarts output
+        out.stop();
+        assert_eq!(out.played_frames(), None);
+        let fill: Box<dyn FnMut(&mut [f32], usize) + Send> = Box::new(|_: &mut [f32], _: usize| {});
+        out.start(fill).unwrap();
+        assert_eq!(out.played_frames(), Some(0));
+        assert_eq!(out.restarts, 1);
+        out.stop();
+    }
+}

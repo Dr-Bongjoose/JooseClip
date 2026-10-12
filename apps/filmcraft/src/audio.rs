@@ -2,7 +2,7 @@
 //! ("Device Class"), the output device, the I/O buffer size and the sample rate.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use filmcraft_engine::settings::AudioHardwarePrefs;
@@ -11,6 +11,10 @@ use filmcraft_ui_egui::{AudioDevices, AudioOut};
 pub struct CpalOut {
     stream: Option<cpal::Stream>,
     played: Arc<AtomicU64>,
+    /// The stream errored (ALSA underruns kill the stream: the host never returns it to
+    /// live). A dead stream must not act as the playback clock — `played_frames` reports
+    /// `None` and playback falls back to wall time until the next `start` resets the flag.
+    errored: Arc<AtomicBool>,
     rate: u32,
     channels: u16,
     hw: AudioHardwarePrefs,
@@ -48,6 +52,7 @@ impl CpalOut {
         Some(Self {
             stream: None,
             played: Arc::new(AtomicU64::new(0)),
+            errored: Arc::new(AtomicBool::new(false)),
             rate: cfg.sample_rate().0,
             channels: cfg.channels(),
             hw: AudioHardwarePrefs::default(),
@@ -87,8 +92,13 @@ impl AudioOut for CpalOut {
         self.rate = cfg.sample_rate().0;
         self.channels = cfg.channels();
         self.played.store(0, Ordering::SeqCst);
+        self.errored.store(false, Ordering::SeqCst);
         let played = self.played.clone();
-        let err = |e| eprintln!("filmcraft: audio stream error: {e}");
+        let errored = self.errored.clone();
+        let err = move |e| {
+            errored.store(true, Ordering::SeqCst);
+            eprintln!("filmcraft: audio stream error: {e}");
+        };
         let stream = match cfg.sample_format() {
             cpal::SampleFormat::F32 => dev.build_output_stream(
                 &config,
@@ -116,6 +126,9 @@ impl AudioOut for CpalOut {
         self.channels as usize
     }
     fn played_frames(&self) -> Option<u64> {
+        if self.errored.load(Ordering::SeqCst) {
+            return None;
+        }
         self.stream.as_ref().map(|_| self.played.load(Ordering::SeqCst))
     }
     fn devices(&self) -> AudioDevices {
