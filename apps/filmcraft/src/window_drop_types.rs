@@ -29,8 +29,9 @@ pub fn register_types() -> Result<usize, String> {
             // The attempt runs on the first frame (the main thread); anything else is a bug.
             return Err("drop types not registered: not on the main thread".into());
         };
-        const FILE_URL: &NSString = ns_string!("public.file-url"); // NSPasteboardTypeFileURL
-        let types = NSArray::from_slice(&[FILE_URL]);
+        // ns_string! caches per thread; it is not const-evaluable (E0015)
+        let file_url: &NSString = ns_string!("public.file-url"); // NSPasteboardTypeFileURL
+        let types = NSArray::from_slice(&[file_url]);
         let app = NSApplication::sharedApplication(mtm);
         let mut registered = 0usize;
         for w in app.windows() {
