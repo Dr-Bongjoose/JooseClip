@@ -86,6 +86,11 @@ pub struct HostHooks {
     pub shortcuts_changed: Option<Box<dyn FnMut(&[menus::MenuItem])>>,
     /// Open dialog for a JSON file (shortcut preset import): filter name, extensions → path.
     pub pick_open_file: Option<Box<dyn FnMut(&str, &[&str]) -> Option<String>>>,
+    /// Register the macOS window drag types winit does not ship (modern Finder promises file
+    /// URLs, winit registers the legacy filenames type only). Runs once on the first frame;
+    /// the window is then live for drag-import. Elsewhere: not installed, drop handling stays
+    /// winit's own.
+    pub mac_window_drop_types: Option<Box<dyn FnMut() -> Result<(), String>>>,
     /// Folder picker (Link Media search, proxy and Project Manager destinations).
     pub pick_folder: Option<Box<dyn FnMut() -> Option<String>>>,
     /// Bring the window on screen for control-channel UI requests *without* taking keyboard focus
@@ -221,6 +226,8 @@ pub struct FilmcraftApp {
     input_waiters: Vec<Sender<Value>>,
     next_token: u64,
     styled: bool,
+    /// The macOS drop types registered (one attempt on the first frame).
+    drop_types_registered: bool,
     /// A panic in the UI pass, shown in an error window until dismissed (see [`crash`]).
     pub ui_error: Option<String>,
     /// Fault injection for robustness tests: the next UI pass panics.
@@ -415,6 +422,7 @@ impl FilmcraftApp {
             input_waiters: Vec::new(),
             next_token: 1,
             styled: false,
+            drop_types_registered: false,
             ui_error: None,
             panic_next_frame: false,
             fonts_ready: false,
@@ -1059,18 +1067,67 @@ impl FilmcraftApp {
         }
     }
 
-    /// Import dropped files.
+    /// Import dropped files, from a file manager drag. Folders are walked for their media and
+    /// documents (Premiere imports the folder's contents). The outcome is reported in the
+    /// status bar: a drop that does nothing is never silent (AGENTS.md §0.1) — import errors,
+    /// unsupported files, empty folders and missing paths all surface there.
     fn handle_drops(&mut self, ctx: &egui::Context) {
         let dropped = ctx.input(|i| i.raw.dropped_files.clone());
+        if dropped.is_empty() {
+            return;
+        }
         let mut paths = Vec::new();
-        for f in dropped {
-            let p = f.path();
-            if p.exists() {
+        let mut rejected = Vec::new();
+        for f in &dropped {
+            let p = f.path().to_path_buf();
+            if !p.exists() {
+                rejected.push(format!("{} (not on disk)", p.display()));
+            } else if p.is_dir() {
+                let found = folder_import(&p, 0);
+                if found.is_empty() {
+                    rejected.push(format!("{} (a folder without importable files)", p.display()));
+                }
+                paths.extend(found.iter().map(|p| p.to_string_lossy().to_string()));
+            } else if p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("fcproj")) {
+                rejected.push(format!("{} (a project file: open it with File ▸ Open instead of dropping it into a project)", p.display()));
+            } else {
                 paths.push(p.to_string_lossy().to_string());
             }
         }
         if !paths.is_empty() {
-            let _ = self.session.execute("file.import", json!({"paths": paths}));
+            match self.session.execute("file.import", json!({"paths": paths})) {
+                Ok(v) => {
+                    let n = |v: &Value, key: &str| v.get(key).and_then(Value::as_array).map_or(0, |a| a.len());
+                    let (imported, failed) = (n(&v, "items"), n(&v, "errors"));
+                    if imported > 0 && failed > 0 {
+                        self.ui.status = format!("Imported {imported} item(s); {failed} file(s) failed");
+                    } else if imported > 0 {
+                        self.ui.status = format!("Imported {imported} item(s) from the drop");
+                    } else {
+                        // every path failed (the engine also returns this as Err; belt and braces)
+                        self.ui.status = format!(
+                            "Nothing imported: {}",
+                            v.get("errors").and_then(Value::as_array).map_or("the dropped file(s) are not importable".to_string(), |a| a
+                                .iter()
+                                .filter_map(|x| x.as_str())
+                                .next()
+                                .unwrap_or("not importable")
+                                .to_string())
+                        );
+                    }
+                }
+                Err(e) => self.ui.status = format!("Import failed: {e}"),
+            }
+        }
+        if !rejected.is_empty() {
+            let lead = if paths.is_empty() { false } else { true };
+            let msg = format!("Dropped, not imported: {}", rejected.join("; "));
+            self.ui.status = if lead {
+                let cur = self.ui.status.clone();
+                format!("{cur}; {msg}")
+            } else {
+                msg
+            };
         }
     }
 
@@ -1480,6 +1537,48 @@ impl FilmcraftApp {
     }
 }
 
+/// Document files `file.import` reads from bytes (captions, interchange): kept when walking a
+/// dropped folder. Direct file drops pass through unfiltered (the engine detects by reading).
+const FOLDER_DOC_EXTENSIONS: &[&str] = &["srt", "vtt", "scc", "webvtt", "mcc", "stl", "ttml", "dfxp", "xml", "edl", "fcpxml", "otio", "aaf", "omf", "omfi"];
+
+/// The files under a dropped folder that `file.import` handles: media (the engine's own
+/// extension lists) and document files (captions, interchange), sorted for stable item order.
+/// The walk is depth- and count-capped (AGENTS.md §0.4/§5: input-derived sizes are hostile);
+/// an unreadable folder yields nothing instead of an error — the drop still reports.
+fn folder_import(dir: &std::path::Path, depth: u8) -> Vec<std::path::PathBuf> {
+    const MAX_DEPTH: u8 = 8;
+    const MAX_FILES: usize = 512;
+    if depth >= MAX_DEPTH {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        let mut subdirs = Vec::new();
+        for entry in entries.flatten() {
+            if out.len() >= MAX_FILES {
+                break;
+            }
+            let path = entry.path();
+            if path.is_dir() {
+                subdirs.push(path);
+                continue;
+            }
+            let doc = path.extension().and_then(|e| e.to_str()).map(|e| FOLDER_DOC_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()));
+            if filmcraft_media::is_importable(&path) || doc == Some(true) {
+                out.push(path);
+            }
+        }
+        for d in subdirs {
+            if out.len() >= MAX_FILES {
+                break;
+            }
+            out.extend(folder_import(&d, depth + 1));
+        }
+    }
+    out.sort();
+    out
+}
+
 impl eframe::App for FilmcraftApp {
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         if !self.synthetic.is_empty() {
@@ -1499,6 +1598,14 @@ impl eframe::App for FilmcraftApp {
     }
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.drop_types_registered {
+            self.drop_types_registered = true; // one attempt; without the hook drop handling stays winit's own
+            if let Some(h) = self.hooks.mac_window_drop_types.as_mut()
+                && let Err(e) = h()
+            {
+                self.ui.status = e; // §0.1: a dead import path is reported, never silent
+            }
+        }
         if !self.styled {
             theme::install(ctx, &self.tokens);
             // theme::install replaces the fonts: add the system Japanese font back (or fall back to
@@ -1759,11 +1866,7 @@ mod audio_recovery_tests {
             48_000
         }
         fn played_frames(&self) -> Option<u64> {
-            if self.stream_alive && !self.errored {
-                Some(self.frames)
-            } else {
-                None
-            }
+            if self.stream_alive && !self.errored { Some(self.frames) } else { None }
         }
     }
 
@@ -1788,5 +1891,49 @@ mod audio_recovery_tests {
         assert_eq!(out.played_frames(), Some(0));
         assert_eq!(out.restarts, 1);
         out.stop();
+    }
+}
+
+#[cfg(test)]
+mod folder_import_tests {
+    use super::*;
+
+    /// A dropped folder imports its media and caption/interchange files, nested, sorted.
+    #[test]
+    fn walks_media_and_documents() {
+        let d = std::env::temp_dir().join(format!("jc-folder-import-{}", std::process::id()));
+        let nested = d.join("b-roll");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(d.join("a.mp4"), b"x").unwrap();
+        std::fs::write(d.join("c.MOV"), b"x").unwrap();
+        std::fs::write(d.join("subs.srt"), b"x").unwrap();
+        std::fs::write(d.join("notes.txt"), b"x").unwrap();
+        std::fs::write(d.join("sheet.csv"), b"x").unwrap();
+        std::fs::write(nested.join("nested.webm"), b"x").unwrap();
+        let got = folder_import(&d, 0);
+        let names: Vec<String> = got.iter().map(|p| p.file_name().unwrap().to_string_lossy().to_string()).collect();
+        assert_eq!(names, ["a.mp4", "nested.webm", "c.MOV", "subs.srt"]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Depth and count caps hold: a hostile tree (self-referencing depth) stays bounded.
+    #[test]
+    fn caps_are_respected() {
+        // cap: more importable files than MAX_FILES → at most MAX_FILES returned
+        let d = std::env::temp_dir().join(format!("jc-folder-cap-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        for i in 0..600 {
+            std::fs::write(d.join(format!("v{i:03}.mp4")), b"x").unwrap();
+        }
+        let got = folder_import(&d, 0);
+        assert!(got.len() <= 512, "got {}", got.len());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// An unreadable folder (deleted race, permissions) yields nothing, not an error state.
+    #[test]
+    fn unreadable_folder_is_empty() {
+        assert!(folder_import(std::path::Path::new("/jx/definitely/not/here"), 0).is_empty());
+        assert!(folder_import(std::path::Path::new("/tmp"), 255).is_empty());
     }
 }

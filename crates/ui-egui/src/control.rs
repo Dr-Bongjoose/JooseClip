@@ -374,6 +374,19 @@ pub fn handle(app: &mut FilmcraftApp, ctx: &egui::Context, req: &ControlRequest)
             app.raise_for_control(ctx);
             Outcome::Screenshot { path: s("path").map(str::to_string), crop }
         }
+        "ui.drop" => {
+            // Simulate a file-manager drop: the files enter egui's raw input exactly the way
+            // the windowing system delivers a real drag (the UI's own drop handling imports).
+            let Some(arr) = p.get("paths").and_then(Value::as_array) else { return err("need `paths`") };
+            let mut n = 0u64;
+            for v in arr {
+                if let Some(path) = v.as_str() {
+                    ctx.input_mut(|i| i.raw.dropped_files.push(std::sync::Arc::new(BridgeFile { path: path.into() })));
+                    n += 1;
+                }
+            }
+            ok(json!({"dropped": n})) // the outcome lands in the reply to the next ui.inspect/status read
+        }
         "ui.resize" => {
             let w = p.get("width").and_then(Value::as_f64).unwrap_or(1600.0) as f32;
             let h = p.get("height").and_then(Value::as_f64).unwrap_or(1000.0) as f32;
@@ -407,6 +420,22 @@ fn merge(v: &mut Value, patch: &Value) {
             }
         }
         (v, p) => *v = p.clone(),
+    }
+}
+
+/// A drop injected by the control channel (`ui.drop`): a real path on this machine, read like
+/// any windowing-system drop.
+#[derive(Debug)]
+struct BridgeFile {
+    path: std::path::PathBuf,
+}
+
+impl egui::DroppedFile for BridgeFile {
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.path).map_err(|e| e.to_string())
     }
 }
 
