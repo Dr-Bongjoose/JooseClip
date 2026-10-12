@@ -87,6 +87,13 @@ pub fn handle(app: &mut FilmcraftApp, ctx: &egui::Context, req: &ControlRequest)
     match req.method.as_str() {
         "engine.execute" | "ui.menu.invoke" => {
             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
+            // Agent driving cannot answer the native file dialogs some commands open: refuse
+            // with the actionable error instead of hanging the bridge (AGENTS.md §0).
+            if crate::would_open_native_dialog(app.session.path.as_deref(), id, &p.get("params").cloned().unwrap_or(json!({}))) {
+                return err(format!(
+                    "`{id}` opens a native file dialog, unavailable while an agent drives the app (`--control`): pass the path(s) the command documents as parameters instead"
+                ));
+            }
             let params = p.get("params").cloned().unwrap_or(json!({}));
             match crate::menus::invoke(app, ctx, id, params) {
                 Ok(v) => ok(v),

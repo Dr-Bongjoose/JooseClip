@@ -1579,6 +1579,90 @@ fn folder_import(dir: &std::path::Path, depth: u8) -> Vec<std::path::PathBuf> {
     out
 }
 
+/// Commands whose UI route opens a NATIVE modal file dialog: see [`would_open_native_dialog`].
+#[cfg(test)]
+mod native_dialog_tests {
+    use super::*;
+
+    /// Every id the live sweep wedged on (2026-10-11 control-bridge run, xvfb) refuses when the
+    /// request carries no path — that is the request the bridge gets when the command's dialog
+    /// would open, and the bridge must answer with an error instead of hanging.
+    #[test]
+    fn wedged_ids_refuse_without_path_params() {
+        let empty = serde_json::json!({});
+        for id in [
+            "file.import",
+            "file.open",
+            "file.saveAll",
+            "file.exportAle",
+            "file.exportSelectionProject",
+            "file.mediaPropertiesFile",
+            "graphics.newFromFile",
+            "graphics.template.install",
+            "captions.import",
+            "captions.export",
+            "media.attachProxies",
+        ] {
+            assert!(would_open_native_dialog(None, id, &empty), "{id} with no path opens the native dialog");
+        }
+    }
+
+    /// Explicit-path requests drive (the request the agent passes after the refusal above).
+    #[test]
+    fn path_params_drive() {
+        for (id, params) in [
+            ("file.import", serde_json::json!({"paths": ["/a.mp4"]})),
+            ("file.import", serde_json::json!({"path": "/a.mp4"})),
+            ("file.open", serde_json::json!({"path": "/p.fcproj"})),
+            ("file.save", serde_json::json!({"path": "/p.fcproj"})),
+            ("file.saveAll", serde_json::json!({})), // with a saved path on the project this saves silently
+            ("graphics.template.install", serde_json::json!({"path": "/t.fcgt"})),
+            ("media.attachProxies", serde_json::json!({"dir": "/proxies"})),
+        ] {
+            let with_saved = Some("/projects/p.fcproj");
+            let no = would_open_native_dialog(with_saved, id, &params);
+            assert!(!no, "{id} with explicit params must not open a dialog");
+        }
+        // but an unsaved project still needs the save dialog: bare save/saveAll hang it
+        assert!(would_open_native_dialog(None, "file.saveAll", &serde_json::json!({})));
+        assert!(would_open_native_dialog(None, "file.save", &serde_json::json!({})));
+        // a saved project's plain save is silent
+        assert!(!would_open_native_dialog(Some("/p.fcproj"), "file.save", &serde_json::json!({})));
+    }
+}
+
+/// Whether invoking `id` with `params` opens a NATIVE modal file dialog (rfd): the command
+/// takes its path from the dialog and the params don't carry one. While an agent drives the
+/// app over the control channel nobody can answer that dialog — the bridge refuses with an
+/// actionable error instead (AGENTS.md §0: an error the caller can act on, never a hang);
+/// invoking from the UI or with explicit params is unchanged. Mirrors (and is the single
+/// source of truth for) the file-dialog routing in `menus::invoke`; `session_path` is the
+/// project's own saved path (it decides whether a plain `file.save` needs the dialog).
+pub fn would_open_native_dialog(session_path: Option<&str>, id: &str, params: &Value) -> bool {
+    let has = |k: &str| {
+        (params.get(k).and_then(Value::as_str).is_some_and(|v| !v.is_empty()))
+            || params.get(k).and_then(Value::as_array).is_some_and(|a| a.iter().any(|v| v.as_str().is_some()))
+    };
+    (id == "file.import" && !has("paths") && !has("path"))
+        || (matches!(
+            id,
+            "file.importImageSequence"
+                | "file.open"
+                | "file.saveAs"
+                | "file.saveCopy"
+                | "captions.import"
+                | "captions.export"
+                | "graphics.newFromFile"
+                | "graphics.template.install"
+                | "file.exportAle"
+                | "file.exportSelectionProject"
+                | "file.mediaPropertiesFile"
+        ) && !has("path"))
+        || (matches!(id, "media.linkMedia" | "media.attachProxies") && !has("paths") && !has("path") && !has("dir"))
+        || (id == "file.saveAll" && session_path.is_none())
+        || (id == "file.save" && !has("path") && session_path.is_none())
+}
+
 impl eframe::App for FilmcraftApp {
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         if !self.synthetic.is_empty() {

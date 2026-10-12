@@ -469,7 +469,7 @@ fn transport(app: &mut FilmcraftApp, ui: &mut egui::Ui, row: Rect, which: Which)
             (Icon::GoToOut, "src.goOut", "Go to Out (Shift+O)"),
             (Icon::Insert, "source.insert", "Insert (,)"),
             (Icon::Overwrite, "source.overwrite", "Overwrite (.)"),
-            (Icon::Camera, "exportFrame", "Export Frame (Shift+E)"),
+            (Icon::Camera, "file.exportFrame", "Export Frame (Shift+E)"),
             (Icon::Proxy, "media.toggleProxies", "Toggle Proxies"),
         ]
     } else {
@@ -488,7 +488,7 @@ fn transport(app: &mut FilmcraftApp, ui: &mut egui::Ui, row: Rect, which: Which)
             (Icon::GoToOut, "markers.goToOut", "Go to Out (Shift+O)"),
             (Icon::Lift, "sequence.lift", "Lift (;)"),
             (Icon::Extract, "sequence.extract", "Extract (')"),
-            (Icon::Camera, "exportFrame", "Export Frame (Shift+E)"),
+            (Icon::Camera, "file.exportFrame", "Export Frame (Shift+E)"),
             (Icon::Proxy, "media.toggleProxies", "Toggle Proxies"),
         ]
     };
@@ -527,8 +527,10 @@ fn transport(app: &mut FilmcraftApp, ui: &mut egui::Ui, row: Rect, which: Which)
                     app.toggle_target(PlaybackTarget::Source, 1.0);
                     Ok(json!({"playing": app.playback.playing && app.playback.target == PlaybackTarget::Source}))
                 }
-                "exportFrame" => {
-                    app.ui.status = "Export Frame: use Export mode (M6)".into();
+                "file.exportFrame" if which == Which::Source => {
+                    // the engine's Export Frame renders the Program frame; the source-clip
+                    // still export is not wired (filed defect)
+                    app.ui.status = "Export Frame exports the Program monitor's frame (source-clip stills are not wired yet)".into();
                     Ok(serde_json::Value::Null)
                 }
                 c => crate::menus::invoke(app, &ctx, c, json!({})),
