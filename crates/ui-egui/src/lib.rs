@@ -116,9 +116,49 @@ pub enum Dialog {
     AddTracks,
 }
 
+/// The shared clock drives this monitor: the Program monitor's sequence playhead by default.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PlaybackTarget {
+    #[default]
+    Program,
+    Source,
+}
+
+/// One playback-clock step ([`clock_step`]): keep playing or park-and-stop / park-and-restart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClockStep {
+    /// Keep playing at this tick.
+    Advance(Tick),
+    /// Playback ends at this tick (the playhead parks here).
+    Stop(Tick),
+    /// Loop restart: the playhead parks here and the clock starts again.
+    Restart(Tick),
+}
+
+/// One playback-clock step, pure (the UI applies the action to the right monitor's playhead):
+/// keep playing or park-and-stop / park-and-restart at it.
+/// `lo` bounds playback (the source clip's In point; the sequence starts at zero) and is
+/// also where the reverse play stops; `loop_start` is where a loop restart begins
+/// (the sequence's In mark; a clip loops over its whole view). `stop_at` is only honored
+/// forward and without looping (Play In to Out).
+pub fn clock_step(t: Tick, speed: f64, loop_start: Tick, lo: Tick, hi: Tick, frame: Tick, looping: bool, stop_at: Option<Tick>) -> ClockStep {
+    if let Some(end) = stop_at.filter(|e| t >= *e && speed > 0.0 && !looping) {
+        return ClockStep::Stop(end);
+    }
+    if speed > 0.0 && t >= hi {
+        if looping { ClockStep::Restart(loop_start) } else { ClockStep::Stop(hi - frame) }
+    } else if speed < 0.0 && t <= lo {
+        ClockStep::Stop(lo)
+    } else {
+        ClockStep::Advance(t)
+    }
+}
+
 #[derive(Default)]
 pub struct Playback {
     pub playing: bool,
+    /// Which monitor's playhead the clock advances while [`Self::playing`].
+    pub target: PlaybackTarget,
     pub speed: f64,
     pub looping: bool,
     /// Wall-clock (egui time, s) and timeline tick when playback (re)started.
@@ -629,54 +669,98 @@ impl FilmcraftApp {
     // ---------------------------------------------------------------- playback
 
     pub fn toggle_play(&mut self, speed: f64) {
-        if self.playback.playing {
+        self.toggle_target(PlaybackTarget::Program, speed)
+    }
+
+    /// The panel-scoped Play-Stop toggle (Space): the Source monitor's own clip when it has
+    /// focus and a clip is loaded, the sequence otherwise.
+    pub fn toggle_focused(&mut self, speed: f64) {
+        let source = self.ui.focused == dock::PanelKind::Source && self.session.state.source_item.is_some();
+        self.toggle_target(if source { PlaybackTarget::Source } else { PlaybackTarget::Program }, speed)
+    }
+
+    pub fn toggle_target(&mut self, target: PlaybackTarget, speed: f64) {
+        if self.playback.playing && self.playback.target == target {
             self.stop();
         } else {
-            self.play(speed);
+            self.play_target(target, speed);
         }
     }
 
     pub fn play(&mut self, speed: f64) {
-        if self.session.active_sequence().is_none() {
+        self.play_target(PlaybackTarget::Program, speed)
+    }
+
+    pub fn play_target(&mut self, target: PlaybackTarget, speed: f64) {
+        if target == PlaybackTarget::Source && self.session.state.source_item.is_none() {
+            self.ui.status = "No clip is loaded in the Source monitor".into();
             return;
         }
-        // restart from the end → from the start (Settings ▸ Timeline ▸ "At playback end, return to
-        // beginning when restarting playback")
-        let dur = self.session.active_sequence().map(|q| q.duration()).unwrap_or_default();
-        if speed > 0.0 && self.session.prefs.timeline.return_to_beginning && self.session.playhead() >= dur - self.session.sequence_rate().frame_duration() {
-            self.session.set_playhead(Tick::ZERO);
+        // One clock: starting the other monitor stops this one (and its audio).
+        if self.playback.playing && self.playback.target != target {
+            self.stop();
+        }
+        if target == PlaybackTarget::Program && self.session.active_sequence().is_none() {
+            return;
+        }
+        if target == PlaybackTarget::Program {
+            // restart from the end → from the start (Settings ▸ Timeline ▸ "At playback end, return
+            // to beginning when restarting playback")
+            let dur = self.session.active_sequence().map(|q| q.duration()).unwrap_or_default();
+            if speed > 0.0 && self.session.prefs.timeline.return_to_beginning && self.session.playhead() >= dur - self.session.sequence_rate().frame_duration()
+            {
+                self.session.set_playhead(Tick::ZERO);
+            }
+        } else if let Some(view) = self.session.state.source_item.and_then(|i| filmcraft_engine::clip_ops::source_view(&self.session, i)) {
+            // a source clip played at (or past) its end restarts from its In point, reverse at
+            // the start from its Out point (Premiere behavior; no preference for the Source monitor)
+            let frame = view.rate.frame_duration();
+            let first = view.start;
+            let last = view.mark_out.map(|o| o + frame).unwrap_or(view.end) - frame;
+            if speed > 0.0 && self.session.state.source_playhead >= last {
+                self.set_playhead(true, first);
+            } else if speed < 0.0 && self.session.state.source_playhead <= first {
+                self.set_playhead(true, last);
+            }
         }
         // A loop restart keeps counting into the same meter.
         if !self.playback.playing || self.playback.speed != speed {
             self.playback.meter.start(speed);
         }
         self.playback.playing = true;
+        self.playback.target = target;
         self.playback.speed = speed;
-        self.playback.anchor_tick = self.session.playhead();
+        self.playback.anchor_tick = if target == PlaybackTarget::Source { self.session.state.source_playhead } else { self.session.playhead() };
         self.playback.anchor_time = -1.0; // set when the preroll ends
         self.playback.preroll = Some(-1.0);
         self.playback.preroll_ready = false;
-        if let Some(a) = self.audio.as_mut() {
-            a.stop();
+        if target == PlaybackTarget::Program {
+            if let Some(a) = self.audio.as_mut() {
+                a.stop();
+            }
+            self.playback.audio_clock = false;
         }
-        self.playback.audio_clock = false;
     }
 
     /// Start the clock (and audio) once the first frames are ready or the preroll timed out.
     fn end_preroll(&mut self, now: f64) {
         self.playback.preroll = None;
         self.playback.anchor_time = now;
-        self.playback.anchor_tick = self.session.playhead();
-        self.start_audio();
-        // Audio Track Mixer: an automation pass runs while playing forward in real time
-        if (self.playback.speed - 1.0).abs() < 1e-9 && !self.session.mixrec.active() {
-            let t = self.session.playhead();
-            let _ = self.session.execute("mixer.recordStart", json!({"time": t.0}));
+        self.playback.anchor_tick = if self.playback.target == PlaybackTarget::Source { self.session.state.source_playhead } else { self.session.playhead() };
+        // The Source monitor plays its clip without the sequence's audio, mixer automation,
+        // multi-camera recording and voice-over capture (all program playback).
+        if self.playback.target == PlaybackTarget::Program {
+            self.start_audio();
+            // Audio Track Mixer: an automation pass runs while playing forward in real time
+            if (self.playback.speed - 1.0).abs() < 1e-9 && !self.session.mixrec.active() {
+                let t = self.session.playhead();
+                let _ = self.session.execute("mixer.recordStart", json!({"time": t.0}));
+            }
+            // Multi-Camera view: playing records live cuts (keys 1–9 / clicking angles)
+            panels::multicam::on_play(self);
+            // voice-over: the capture starts with the audio clock
+            panels::voiceover::on_play(self);
         }
-        // Multi-Camera view: playing records live cuts (keys 1–9 / clicking angles)
-        panels::multicam::on_play(self);
-        // voice-over: the capture starts with the audio clock
-        panels::voiceover::on_play(self);
     }
 
     pub fn stop(&mut self) {
@@ -689,14 +773,17 @@ impl FilmcraftApp {
             a.stop();
         }
         self.playback.audio_clock = false;
-        if self.session.mixrec.active() {
-            let t = self.session.playhead();
-            if let Err(e) = self.session.execute("mixer.recordStop", json!({"time": t.0})) {
-                self.ui.status = e.to_string();
+        // Program playback only: the mixer automation, multi-camera cuts and voice-over capture.
+        if self.playback.target == PlaybackTarget::Program {
+            if self.session.mixrec.active() {
+                let t = self.session.playhead();
+                if let Err(e) = self.session.execute("mixer.recordStop", json!({"time": t.0})) {
+                    self.ui.status = e.to_string();
+                }
             }
+            panels::multicam::on_stop(self);
+            panels::voiceover::on_stop(self);
         }
-        panels::multicam::on_stop(self);
-        panels::voiceover::on_stop(self);
     }
 
     fn start_audio(&mut self) {
@@ -753,7 +840,28 @@ impl FilmcraftApp {
         if self.playback.anchor_time < 0.0 {
             self.playback.anchor_time = now;
         }
-        let rate = self.session.sequence_rate();
+        let source = self.playback.target == PlaybackTarget::Source;
+        // The clock's monitor determines the rate, the bounds (the sequence's marks, or the
+        // source clip's span) and which playhead the step applies to.
+        let (rate, loop_start, floor, hi) = if source {
+            let view = self.session.state.source_item.and_then(|item| filmcraft_engine::clip_ops::source_view(&self.session, item));
+            let Some(view) = view else {
+                // the source clip vanished mid-play: stop, never crash (AGENTS.md §0)
+                self.stop();
+                return;
+            };
+            let frame = view.rate.frame_duration();
+            (view.rate, view.start, view.start, view.mark_out.map(|o| o + frame).unwrap_or(view.end))
+        } else {
+            let seq = self.session.active_sequence();
+            let dur = seq.map(|q| q.duration()).unwrap_or_default();
+            let hi = if self.playback.looping {
+                seq.and_then(|q| q.mark_out).map(|o| o + self.session.sequence_rate().frame_duration()).unwrap_or(dur)
+            } else {
+                dur
+            };
+            (self.session.sequence_rate(), seq.and_then(|q| q.mark_in).unwrap_or(Tick::ZERO), Tick::ZERO, hi)
+        };
         let elapsed = if self.playback.audio_clock {
             match self.audio.as_ref().and_then(|a| a.played_frames().map(|f| (f, a.sample_rate()))) {
                 Some((f, sr)) => f as f64 / sr as f64,
@@ -763,31 +871,28 @@ impl FilmcraftApp {
             now - self.playback.anchor_time
         };
         let t = self.playback.anchor_tick + Tick::from_seconds_f64(elapsed * self.playback.speed);
-        let seq = self.session.active_sequence();
-        let dur = seq.map(|q| q.duration()).unwrap_or_default();
-        let (lo, hi) = if self.playback.looping {
-            (seq.and_then(|q| q.mark_in).unwrap_or(Tick::ZERO), seq.and_then(|q| q.mark_out).map(|o| o + rate.frame_duration()).unwrap_or(dur))
-        } else {
-            (Tick::ZERO, dur)
-        };
-        if let Some(end) = self.playback.stop_at.filter(|e| t >= *e && self.playback.speed > 0.0 && !self.playback.looping) {
-            self.session.set_playhead(end);
-            self.stop();
-        } else if t >= hi && self.playback.speed > 0.0 {
-            if self.playback.looping {
-                self.session.set_playhead(lo);
-                self.play(self.playback.speed);
-            } else {
-                self.session.set_playhead(hi - rate.frame_duration());
+        match clock_step(t, self.playback.speed, loop_start, floor, hi, rate.frame_duration(), self.playback.looping, self.playback.stop_at) {
+            ClockStep::Advance(t) => self.set_playhead(source, t),
+            ClockStep::Stop(t) => {
+                self.set_playhead(source, t);
                 self.stop();
             }
-        } else if t <= Tick::ZERO && self.playback.speed < 0.0 {
-            self.session.set_playhead(Tick::ZERO);
-            self.stop();
+            ClockStep::Restart(loop_start) => {
+                self.set_playhead(source, loop_start);
+                self.play_target(self.playback.target, self.playback.speed);
+            }
+        }
+        ctx.request_repaint();
+    }
+
+    /// The clock's playhead write: the engine's source playhead (snapped and clamped inside the
+    /// clip's span by `source.setPlayhead`) or the sequence playhead.
+    fn set_playhead(&mut self, source: bool, t: Tick) {
+        if source {
+            let _ = self.session.execute("source.setPlayhead", json!({"time": t.0}));
         } else {
             self.session.set_playhead(t);
         }
-        ctx.request_repaint();
     }
 
     // ---------------------------------------------------------------- textures
@@ -1545,5 +1650,76 @@ mod gpu_fallback_tests {
         assert_eq!(super::plan_side(&p), 1920);
         let p = FramePlan::Image(filmcraft_render::Image::new(800, 4000));
         assert_eq!(super::plan_side(&p), 4000);
+    }
+}
+
+#[cfg(test)]
+mod clock_step_tests {
+    use super::*;
+
+    /// Frame duration at 25 fps. `Tick` is published in the same units everywhere else.
+    const FRAME: Tick = Tick(254_016_000_000 / 25);
+
+    fn t(seconds: f64) -> Tick {
+        Tick((seconds * 254_016_000_000.0) as i64)
+    }
+
+    /// AGENTS.md §9 regression pin for the Source monitor play button: a clip in its span
+    /// (In point > 0, exclusive end) produces plain Advance steps while playing.
+    #[test]
+    fn source_span_plays_forward() {
+        let (lo, hi) = (t(3.0), t(8.0));
+        for at in [3.0, 4.2, 7.99] {
+            assert_eq!(clock_step(t(at), 1.0, lo, lo, hi, FRAME, false, None), ClockStep::Advance(t(at)));
+        }
+    }
+
+    /// Forward playback stops at the last frame of the view, not on the exclusive end.
+    #[test]
+    fn forward_stops_on_last_frame() {
+        let (lo, hi) = (Tick::ZERO, t(8.0));
+        assert_eq!(clock_step(t(7.96), 1.0, lo, lo, hi, FRAME, false, None), ClockStep::Advance(t(7.96)));
+        assert_eq!(clock_step(t(8.0), 1.0, lo, lo, hi, FRAME, false, None), ClockStep::Stop(hi - FRAME));
+        assert_eq!(clock_step(t(9.5), 1.0, lo, lo, hi, FRAME, false, None), ClockStep::Stop(hi - FRAME));
+    }
+
+    /// Looping restarts playback at the sequence's In mark / the clip's In point.
+    #[test]
+    fn looping_restarts_at_loop_start() {
+        let (loop_start, hi) = (t(3.0), t(8.0));
+        assert_eq!(clock_step(t(8.0), 1.0, loop_start, lo_of(), hi, FRAME, true, None), ClockStep::Restart(loop_start));
+        // the sequence's reverse floor stays at zero even while looping (unchanged behavior)
+        assert_eq!(clock_step(t(-0.1), -1.0, loop_start, Tick::ZERO, hi, FRAME, true, None), ClockStep::Stop(Tick::ZERO));
+    }
+
+    fn lo_of() -> Tick {
+        t(3.0)
+    }
+
+    /// Reverse playback stops at the floor (a source clip at its In point).
+    #[test]
+    fn reverse_stops_at_floor() {
+        let (lo, hi) = (t(3.0), t(8.0));
+        assert_eq!(clock_step(t(4.0), -1.0, lo, lo, hi, FRAME, false, None), ClockStep::Advance(t(4.0)));
+        assert_eq!(clock_step(lo, -1.0, lo, lo, hi, FRAME, false, None), ClockStep::Stop(lo));
+        assert_eq!(clock_step(t(2.5), -1.0, lo, lo, hi, FRAME, false, None), ClockStep::Stop(lo));
+    }
+
+    /// Play In to Out: `stop_at` parks the playhead when reached, forward and only without
+    /// looping.
+    #[test]
+    fn stop_at_is_respected_forward_and_unlooped() {
+        let (lo, hi) = (Tick::ZERO, t(10.0));
+        assert_eq!(clock_step(t(3.0), 1.0, lo, lo, hi, FRAME, false, Some(t(4.0))), ClockStep::Advance(t(3.0)));
+        assert_eq!(clock_step(t(4.0), 1.0, lo, lo, hi, FRAME, false, Some(t(4.0))), ClockStep::Stop(t(4.0)));
+        assert_eq!(clock_step(t(4.0), 1.0, lo, lo, hi, FRAME, true, Some(t(4.0))), ClockStep::Advance(t(4.0)));
+        assert_eq!(clock_step(t(4.0), -1.0, lo, lo, hi, FRAME, false, Some(t(4.0))), ClockStep::Advance(t(4.0)));
+    }
+
+    /// The shared clock still defaults to the Program monitor: existing shortcuts, the bridge
+    /// and JKL behave exactly as before this change.
+    #[test]
+    fn clock_defaults_to_program() {
+        assert_eq!(Playback::default().target, PlaybackTarget::Program);
     }
 }

@@ -235,7 +235,8 @@ pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, params: Val
             return Ok(json!({"speed": app.playback.speed}));
         }
         "playback.toggle" => {
-            app.toggle_play(1.0);
+            // Space plays the monitor in focus (the Source monitor's own clip when focused there)
+            app.toggle_focused(1.0);
             return Ok(json!({"playing": app.playback.playing}));
         }
         "playback.forward" => {

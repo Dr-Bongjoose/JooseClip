@@ -11,6 +11,7 @@ use filmcraft_time::{Tick, TimeDisplay, format_time};
 use serde_json::json;
 
 use crate::FilmcraftApp;
+use crate::PlaybackTarget;
 use crate::frames::{FrameKey, Target};
 use crate::icons::{self, Icon};
 use crate::panels::monitor_view;
@@ -145,7 +146,11 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, which: Which)
     ui.set_clip_rect(saved_clip.intersect(if mv.zoom.is_some() && !compare { video_area } else { picture_area.expand(12.0) }));
     if show_picture {
         ui.painter().rect_filled(pic, 0.0, t.monitor_bg);
-        let playing = which == Which::Program && app.playback.playing;
+        let playing = app.playback.playing
+            && match app.playback.target {
+                PlaybackTarget::Program => which == Which::Program,
+                PlaybackTarget::Source => which == Which::Source,
+            };
         let res = mv.effective_res(playing);
         let screen_scale = (pic.width() * ppp / frame_size.0 as f32).min(1.0);
         let scale = quantize_scale(res.scale().min(screen_scale.max(1.0 / 32.0)));
@@ -455,7 +460,11 @@ fn transport(app: &mut FilmcraftApp, ui: &mut egui::Ui, row: Rect, which: Which)
             (Icon::MarkOut, "src.markOut", "Mark Out (O)"),
             (Icon::GoToIn, "src.goIn", "Go to In (Shift+I)"),
             (Icon::StepBack, "src.stepBack", "Step Back 1 Frame (Left)"),
-            (Icon::Play, "src.play", "Play-Stop Toggle (Space)"),
+            (
+                if app.playback.playing && app.playback.target == PlaybackTarget::Source { Icon::Pause } else { Icon::Play },
+                "src.play",
+                "Play-Stop Toggle (Space)",
+            ),
             (Icon::StepFwd, "src.stepFwd", "Step Forward 1 Frame (Right)"),
             (Icon::GoToOut, "src.goOut", "Go to Out (Shift+O)"),
             (Icon::Insert, "source.insert", "Insert (,)"),
@@ -470,7 +479,11 @@ fn transport(app: &mut FilmcraftApp, ui: &mut egui::Ui, row: Rect, which: Which)
             (Icon::MarkOut, "markers.markOut", "Mark Out (O)"),
             (Icon::GoToIn, "markers.goToIn", "Go to In (Shift+I)"),
             (Icon::StepBack, "playhead.stepBack", "Step Back 1 Frame (Left)"),
-            (if app.playback.playing { Icon::Pause } else { Icon::Play }, "playback.toggle", "Play-Stop Toggle (Space)"),
+            (
+                if app.playback.playing && app.playback.target == PlaybackTarget::Program { Icon::Pause } else { Icon::Play },
+                "playback.toggle",
+                "Play-Stop Toggle (Space)",
+            ),
             (Icon::StepFwd, "playhead.stepForward", "Step Forward 1 Frame (Right)"),
             (Icon::GoToOut, "markers.goToOut", "Go to Out (Shift+O)"),
             (Icon::Lift, "sequence.lift", "Lift (;)"),
@@ -510,7 +523,10 @@ fn transport(app: &mut FilmcraftApp, ui: &mut egui::Ui, row: Rect, which: Which)
                     source_nav(app, cmd);
                     Ok(serde_json::Value::Null)
                 }
-                "src.play" => Ok(serde_json::Value::Null),
+                "src.play" => {
+                    app.toggle_target(PlaybackTarget::Source, 1.0);
+                    Ok(json!({"playing": app.playback.playing && app.playback.target == PlaybackTarget::Source}))
+                }
                 "exportFrame" => {
                     app.ui.status = "Export Frame: use Export mode (M6)".into();
                     Ok(serde_json::Value::Null)
