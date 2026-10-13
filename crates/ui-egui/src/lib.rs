@@ -1376,7 +1376,9 @@ impl FilmcraftApp {
     }
 
     /// Import dropped files. With Timeline ▸ drop imports to the timeline, the new items are also
-    /// queued to be placed at the pointer (see `timeline::interact`).
+    /// queued to be placed at the pointer (see `timeline::interact`). A dropped folder expands to
+    /// its importable contents (`folder_import`); the drop reports what it did and why — it
+    /// never dies silently (the fork's d909284 semantics, re-landed on the importer).
     fn handle_drops(&mut self, ctx: &egui::Context) {
         // While files hover, the OS sends no cursor events: poll the cursor each frame to draw the Timeline preview.
         let hovering = ctx.input(|i| i.raw.hovered_files.len());
@@ -1387,26 +1389,72 @@ impl FilmcraftApp {
             None
         };
         let dropped = ctx.input(|i| i.raw.dropped_files.clone());
+        if dropped.is_empty() {
+            return;
+        }
         let mut paths = Vec::new();
-        for f in dropped {
-            let p = f.path();
-            if p.exists() {
+        let mut rejected = Vec::new();
+        for f in &dropped {
+            let p = f.path().to_path_buf();
+            if !p.exists() {
+                rejected.push(format!("{} (not on disk)", p.display()));
+            } else if p.is_dir() {
+                let found = folder_import(&p, 0);
+                if found.is_empty() {
+                    rejected.push(format!("{} (a folder without importable files)", p.display()));
+                }
+                paths.extend(found.iter().map(|p| p.to_string_lossy().to_string()));
+            } else if p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("fcproj")) {
+                rejected.push(format!("{} (a project file: open it with File ▸ Open instead of dropping it into a project)", p.display()));
+            } else {
                 paths.push(p.to_string_lossy().to_string());
             }
         }
         if !paths.is_empty() {
             let pointer = self.drop_pointer(ctx);
-            let imported = self.session.execute("file.import", json!({"paths": paths, "bin": self.import_bin().0}));
-            if let Ok(v) = imported
-                && let Some(pos) = pointer
-                && self.session.prefs.timeline.drop_import_to_timeline
-            {
-                let items: Vec<filmcraft_engine::project::ItemId> =
-                    v["items"].as_array().map(|a| a.iter().filter_map(|i| i.as_u64()).map(filmcraft_engine::project::ItemId).collect()).unwrap_or_default();
-                if !items.is_empty() {
-                    self.pending_timeline_drop = Some((items, pos));
+            match self.session.execute("file.import", json!({"paths": paths, "bin": self.import_bin().0})) {
+                Ok(v) => {
+                    let n = |v: &Value, key: &str| v.get(key).and_then(Value::as_array).map_or(0, |a| a.len());
+                    let (imported, failed) = (n(&v, "items"), n(&v, "errors"));
+                    if imported > 0 && failed > 0 {
+                        self.ui.status = format!("Imported {imported} item(s); {failed} file(s) failed");
+                    } else if imported > 0 {
+                        self.ui.status = format!("Imported {imported} item(s) from the drop");
+                    } else {
+                        // every path failed (the engine also returns this as Err; belt and braces)
+                        self.ui.status = format!(
+                            "Nothing imported: {}",
+                            v.get("errors").and_then(Value::as_array).map_or("the dropped file(s) are not importable".to_string(), |a| a
+                                .iter()
+                                .filter_map(|x| x.as_str())
+                                .next()
+                                .unwrap_or("not importable")
+                                .to_string())
+                        );
+                    }
+                    if imported > 0
+                        && let Some(pos) = pointer
+                        && self.session.prefs.timeline.drop_import_to_timeline
+                    {
+                        let items: Vec<filmcraft_engine::project::ItemId> =
+                            v["items"].as_array().map(|a| a.iter().filter_map(|i| i.as_u64()).map(filmcraft_engine::project::ItemId).collect()).unwrap_or_default();
+                        if !items.is_empty() {
+                            self.pending_timeline_drop = Some((items, pos));
+                        }
+                    }
                 }
+                Err(e) => self.ui.status = format!("Import failed: {e}"),
             }
+        }
+        if !rejected.is_empty() {
+            let lead = !paths.is_empty();
+            let msg = format!("Dropped, not imported: {}", rejected.join("; "));
+            self.ui.status = if lead {
+                let cur = self.ui.status.clone();
+                format!("{cur}; {msg}")
+            } else {
+                msg
+            };
         }
     }
 
@@ -2183,6 +2231,49 @@ fn shuttle_mix_rate(device_rate: u32, speed: f64) -> Option<u32> {
 /// The program mix that playback plays: `mix(device_frame, interleaved, channels)` renders the
 /// active sequence at device rate `sr` from `device_frame`, with the live project snapshot (edits
 /// made while playing are heard), Output Mapping, the 5.1 mixdown and voice-over cues.
+
+/// Document files `file.import` reads from bytes (captions, interchange): kept when walking a
+/// dropped folder. Direct file drops pass through unfiltered (the engine detects by reading).
+const FOLDER_DOC_EXTENSIONS: &[&str] = &["srt", "vtt", "scc", "webvtt", "mcc", "stl", "ttml", "dfxp", "xml", "edl", "fcpxml", "otio", "aaf", "omf", "omfi"];
+
+/// The files under a dropped folder that `file.import` handles: media (the engine's own
+/// extension lists) and document files (captions, interchange), sorted for stable item order.
+/// The walk is depth- and count-capped (AGENTS.md §0.4/§5: input-derived sizes are hostile);
+/// an unreadable folder yields nothing instead of an error — the drop still reports.
+fn folder_import(dir: &std::path::Path, depth: u8) -> Vec<std::path::PathBuf> {
+    const MAX_DEPTH: u8 = 8;
+    const MAX_FILES: usize = 512;
+    if depth >= MAX_DEPTH {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        let mut subdirs = Vec::new();
+        for entry in entries.flatten() {
+            if out.len() >= MAX_FILES {
+                break;
+            }
+            let path = entry.path();
+            if path.is_dir() {
+                subdirs.push(path);
+                continue;
+            }
+            let doc = path.extension().and_then(|e| e.to_str()).map(|e| FOLDER_DOC_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()));
+            if filmcraft_media::is_importable(&path) || doc == Some(true) {
+                out.push(path);
+            }
+        }
+        for d in subdirs {
+            if out.len() >= MAX_FILES {
+                break;
+            }
+            out.extend(folder_import(&d, depth + 1));
+        }
+    }
+    out.sort();
+    out
+}
+
 pub fn playback_mix(session: &Session, seq_id: filmcraft_project::ItemId, sr: u32) -> impl FnMut(i64, &mut [f32], usize) + Send + 'static {
     let project = session.project.clone();
     let provider = session.media.provider(project.clone(), session.services.clone());
@@ -2753,5 +2844,49 @@ mod native_menu_tests {
         app.sync_native_menu();
         assert_eq!(last(&sent, "edit.undo"), Some(false));
         assert_eq!(last(&sent, "edit.redo"), Some(true), "the undone edit can be redone");
+    }
+}
+
+#[cfg(test)]
+mod folder_import_tests {
+    use super::*;
+
+    /// A dropped folder imports its media and caption/interchange files, nested, sorted.
+    #[test]
+    fn walks_media_and_documents() {
+        let d = std::env::temp_dir().join(format!("jc-folder-import-{}", std::process::id()));
+        let nested = d.join("b-roll");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(d.join("a.mp4"), b"x").unwrap();
+        std::fs::write(d.join("c.MOV"), b"x").unwrap();
+        std::fs::write(d.join("subs.srt"), b"x").unwrap();
+        std::fs::write(d.join("notes.txt"), b"x").unwrap();
+        std::fs::write(d.join("sheet.csv"), b"x").unwrap();
+        std::fs::write(nested.join("nested.webm"), b"x").unwrap();
+        let got = folder_import(&d, 0);
+        let names: Vec<String> = got.iter().map(|p| p.file_name().unwrap().to_string_lossy().to_string()).collect();
+        assert_eq!(names, ["a.mp4", "nested.webm", "c.MOV", "subs.srt"]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Depth and count caps hold: a hostile tree (self-referencing depth) stays bounded.
+    #[test]
+    fn caps_are_respected() {
+        // cap: more importable files than MAX_FILES → at most MAX_FILES returned
+        let d = std::env::temp_dir().join(format!("jc-folder-cap-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        for i in 0..600 {
+            std::fs::write(d.join(format!("v{i:03}.mp4")), b"x").unwrap();
+        }
+        let got = folder_import(&d, 0);
+        assert!(got.len() <= 512, "got {}", got.len());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// An unreadable folder (deleted race, permissions) yields nothing, not an error state.
+    #[test]
+    fn unreadable_folder_is_empty() {
+        assert!(folder_import(std::path::Path::new("/jx/definitely/not/here"), 0).is_empty());
+        assert!(folder_import(std::path::Path::new("/tmp"), 255).is_empty());
     }
 }
