@@ -1,11 +1,11 @@
-//! FilmCraft benchmark suite (`cargo xtask bench`): decode speed per codec, Program-monitor
+//! Joose Clip benchmark suite (`cargo xtask bench`): decode speed per codec, Program-monitor
 //! playback and scrubbing through the real frame scheduler, timeline UI frame time with a large
 //! sequence, export throughput, project save/open, and peak memory per section.
 //!
 //! ```sh
 //! cargo xtask bench                                   # every section, writes target/bench/bench-<label>.{json,md}
 //! cargo xtask bench --sections decode,scrub --repeat 3 --label after
-//! cargo xtask bench --sections decode --hw off --label hw-off   # FilmCraft's own decoders only
+//! cargo xtask bench --sections decode --hw off --label hw-off   # Joose Clip's own decoders only
 //! cargo run --release -p filmcraft-ui-egui --example bench -- --section timeline   # one section, this process
 //! ```
 //!

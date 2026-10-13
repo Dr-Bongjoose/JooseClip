@@ -1,7 +1,7 @@
 //! Graphics templates, responsive design, per-character styles, source graphics and font
 //! replacement (M10.7).
 //!
-//! - **Templates** (`graphics.template.*`): FilmCraft's own `.fcgt` format
+//! - **Templates** (`graphics.template.*`): Joose Clip's own `.fcgt` format
 //!   ([`filmcraft_project::gtemplate`]). Built-in templates are original designs in code; user
 //!   templates live in `<data dir>/Graphics Templates/*.fcgt`. Export As Motion Graphics Template
 //!   makes one from a graphic clip with chosen editable properties; Install copies a `.fcgt` into

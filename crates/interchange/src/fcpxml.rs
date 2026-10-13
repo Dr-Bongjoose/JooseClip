@@ -1,6 +1,6 @@
 //! FCPXML (1.9–1.11) import/export.
 //!
-//! Mapping between FilmCraft's track model and FCPXML's magnetic model:
+//! Mapping between Joose Clip's track model and FCPXML's magnetic model:
 //! - V1 is the primary storyline (`spine`): clips, `gap`s and `transition`s.
 //! - Other video tracks become connected clips with `lane = track index` (V2 → lane 1); audio-only
 //!   items on audio track n become connected clips on lane `-n`. A V1/V2… clip whose linked audio

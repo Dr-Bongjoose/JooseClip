@@ -1,4 +1,4 @@
-//! Graphics templates (`.fcgt`): FilmCraft's own format for reusable graphics with editable
+//! Graphics templates (`.fcgt`): Joose Clip's own format for reusable graphics with editable
 //! properties, the counterpart of motion graphics templates in other editors.
 //!
 //! A template file is UTF-8 JSON ([`GraphicsTemplate`]):
@@ -29,10 +29,10 @@
 //! - `resources.fonts` optionally embeds font files (base64) that the template needs; installing
 //!   the template registers them. Only embed fonts whose licence allows redistribution.
 //!
-//! FilmCraft never reads Adobe `.mogrt` files (or any other application's template format);
+//! Joose Clip never reads Adobe `.mogrt` files (or any other application's template format);
 //! [`GraphicsTemplate::from_bytes`] rejects ZIP archives with a message saying so.
 //!
-//! The built-in templates ([`builtin_templates`]) are original designs made for FilmCraft in code
+//! The built-in templates ([`builtin_templates`]) are original designs made for Joose Clip in code
 //! (no image, font or template files), under the project licence.
 
 use filmcraft_geom::Vec2;
@@ -469,7 +469,7 @@ fn builtin(
     }
 }
 
-/// The built-in templates: original FilmCraft designs (lower thirds, titles, end credits,
+/// The built-in templates: original Joose Clip designs (lower thirds, titles, end credits,
 /// callouts, a ticker), defined here in code. Designed at 1920×1080 with the bundled Inter font.
 pub fn builtin_templates() -> Vec<GraphicsTemplate> {
     let mut v = Vec::new();

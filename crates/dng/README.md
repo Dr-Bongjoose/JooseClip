@@ -54,7 +54,7 @@ the raw image in a SubIFD, and arbitrary extra tags.
   8 × 8), DefaultCrop, the DNG colour model to XYZ D50 and Bradford to linear Rec. 709, and
   BaselineExposure. LinearRaw (3 samples) skips the demosaic; monochrome LinearRaw is grey.
 - **Output:** scene-linear Rec. 709 floats: a white the sensor clipped is 1.0 × 2^BaselineExposure;
-  brighter values are kept (FilmCraft's compositor works in linear float). Negative results of the
+  brighter values are kept (Joose Clip's compositor works in linear float). Negative results of the
   colour matrix are clipped to 0. Black levels scale per pixel by (white − black).
 - **White balance without a ForwardMatrix** follows the specification: the camera matrix takes the
   values to XYZ and a Bradford adaptation moves the as-shot white to D50. Decoders in the dcraw

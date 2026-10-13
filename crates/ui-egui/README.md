@@ -1,4 +1,4 @@
-# FilmCraft interface
+# Joose Clip interface
 
 The egui frontend draws panels and dialogs, and dispatches project changes through the engine.
 Interactive controls keep stable automation ids regardless of the interface language.
@@ -63,7 +63,7 @@ keeps Source navigation, markers and marked-range playback separate from Program
 ## Pane layout controls
 
 Dock transactions and pointer targets use `craft-ui::docking`; bounded split geometry and
-keyboard-accessible resize handles use `craft-ui::layout`. FilmCraft adapts its existing saved
+keyboard-accessible resize handles use `craft-ui::layout`. Joose Clip adapts its existing saved
 dock tree and panel identities to the shared model. Panel tabs or their header grip can move
 between tab groups, split at an edge, reorder, or float when released with Cmd/Ctrl. Floating
 panels move by their empty header and resize from the bottom-right corner. Timeline sequence

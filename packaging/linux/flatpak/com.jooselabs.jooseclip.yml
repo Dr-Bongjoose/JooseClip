@@ -9,8 +9,8 @@
 #
 # The command-line tool and its MCP server run in the same sandbox, without opening a window:
 #
-#   flatpak run --command=filmcraft-cli ai.storyteller.filmcraft --version
-#   flatpak run --command=filmcraft-cli ai.storyteller.filmcraft mcp
+#   flatpak run --command=filmcraft-cli com.jooselabs.jooseclip --version
+#   flatpak run --command=filmcraft-cli com.jooselabs.jooseclip mcp
 #
 # For Flathub, replace the `dir` source with a `git` source pinned to a release tag and commit.
 id: com.jooselabs.jooseclip
@@ -33,7 +33,7 @@ finish-args:
   - --device=dri
   # A project refers to its media by absolute path (docs/project-files.md), and the document
   # portal only exposes the file it was handed, not the media beside it: a project opened from
-  # ~/Videos found none of its clips (#107). So, as other video editors do, FilmCraft reads and
+  # ~/Videos found none of its clips (#107). So, as other video editors do, Joose Clip reads and
   # writes the home directory (media, projects, exports, autosave next to the project) and the
   # usual mount points of external drives, where footage often lives. Open/Save dialogs still go
   # through the file-chooser portal; nothing outside these locations is granted.
@@ -42,7 +42,7 @@ finish-args:
   - --filesystem=/run/media
   - --filesystem=/mnt
   # Deliberately not granted: network (the optional --control server listens on 127.0.0.1 in
-  # the sandbox; `flatpak override --user --share=network ai.storyteller.filmcraft` exposes it
+  # the sandbox; `flatpak override --user --share=network com.jooselabs.jooseclip` exposes it
   # to host agents) and host-wide filesystem access.
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin

@@ -54,7 +54,7 @@ still apply. `engine.commands` and the menus always show the selection's enablem
 **Focus.** Driving the app never steals the user's keyboard. Started with `--control`, the app opens
 without activating itself. UI requests and screenshots that need a rendered frame bring the window
 forward without making it key (macOS `orderFrontRegardless`), so the user's typing keeps going to
-the app they are in. Only an explicit `ui.focus {}` activates FilmCraft. Injected keys work on
+the app they are in. Only an explicit `ui.focus {}` activates Joose Clip. Injected keys work on
 focused widgets even when the native window is in the background.
 
 `ui.focus {id}` targets an enabled, visible widget registered with a real egui response. It rejects

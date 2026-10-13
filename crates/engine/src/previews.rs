@@ -11,7 +11,7 @@
 //!
 //! The folder:
 //!
-//! * saved project `/path/Film.fcproj` → `/path/FilmCraft Previews/Film/`;
+//! * saved project `/path/Film.fcproj` → `/path/Joose Clip Previews/Film/`;
 //! * unsaved project → a per-process folder in the system temp dir; its files move into the
 //!   project's folder on the first save.
 //!

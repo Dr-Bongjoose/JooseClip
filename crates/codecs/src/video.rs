@@ -646,7 +646,7 @@ impl VideoDecoder for Vp8Decoder {
         self.dec.reset();
     }
     fn name(&self) -> &str {
-        "FilmCraft VP8"
+        "Joose Clip VP8"
     }
     fn is_random_access(&self, sample: &[u8]) -> Option<bool> {
         Some(filmcraft_vp8::is_keyframe(sample))

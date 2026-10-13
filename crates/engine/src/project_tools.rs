@@ -8,7 +8,7 @@
 //! | `file.closeAllProjects` / `file.closeAllOtherProjects` | File ▸ Close All Projects / Close All Other Projects |
 //! | `file.saveAsTemplate` | File ▸ Save as Template… (`file.templates`, `file.newProjectFromTemplate`) |
 //! | `file.importFromMediaBrowser` | File ▸ Import from Media Browser (⌥⌘I) |
-//! | `file.exportSelectionProject` | File ▸ Export ▸ Selection as FilmCraft Project… |
+//! | `file.exportSelectionProject` | File ▸ Export ▸ Selection as Joose Clip Project… |
 //! | `file.exportAle` | File ▸ Export ▸ Avid Log Exchange… |
 //! | `file.mediaPropertiesFile` / `file.mediaProperties` | File ▸ Get Media File Properties for ▸ File… / Selection… (⇧⌘H) |
 //! | `file.projectSettings.general` / `.scratchDisks` | File ▸ Project Settings ▸ General… / Scratch Disks… |
@@ -124,7 +124,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         }),
         spec(
             "file.exportSelectionProject",
-            "Selection as FilmCraft Project…",
+            "Selection as Joose Clip Project…",
             &["File", "Export"],
             None,
             r#"{"path":str,"items":[id]?}"#,
@@ -962,7 +962,7 @@ pub fn scratch_paths(s: &Session) -> Value {
 }
 
 /// Render previews folder of the open project: Scratch Disks ▸ Video Previews / `<project
-/// name>`, else `FilmCraft Previews/<project name>` next to the project (None while unsaved).
+/// name>`, else `Joose Clip Previews/<project name>` next to the project (None while unsaved).
 pub fn previews_dir(s: &Session) -> Option<std::path::PathBuf> {
     s.path.as_deref().map(|p| previews_dir_for(&s.project, p))
 }

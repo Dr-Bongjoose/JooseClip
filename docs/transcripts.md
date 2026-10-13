@@ -1,6 +1,6 @@
 # Transcripts and text-based editing
 
-FilmCraft's Text panel ▸ **Transcript** tab shows the dialogue of the open sequence as text. Select
+Joose Clip's Text panel ▸ **Transcript** tab shows the dialogue of the open sequence as text. Select
 words to mark In/Out, then extract or lift them; remove filler words and long pauses in one step;
 turn the transcript into captions. Every action is an engine command (`transcript.*`), so the CLI,
 the control channel and MCP agents can do the same.

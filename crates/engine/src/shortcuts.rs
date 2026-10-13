@@ -16,7 +16,7 @@
 //! are converted on import: their `Ctrl` is the primary modifier (`Cmd`) and `Win`/`Meta` maps to
 //! the macOS Control key.
 //!
-//! Built-in presets: **FilmCraft Default** (each command's default plus the Premiere-default audit,
+//! Built-in presets: **Joose Clip Default** (each command's default plus the Premiere-default audit,
 //! see [`Shortcuts::audit`]), **Premiere Pro Compatible**, **Final Cut Pro Compatible** and
 //! **Avid Media Composer Compatible** ([`crate::shortcut_presets`]). Custom presets are JSON files in
 //! `<data dir>/Keyboard Shortcuts/`; the active set persists in `active.json` there.
@@ -471,7 +471,7 @@ pub struct PresetFile {
     pub format: String,
     pub version: u32,
     pub name: String,
-    /// The OS the key names were written for; None = canonical (FilmCraft) notation.
+    /// The OS the key names were written for; None = canonical (Joose Clip) notation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform: Option<Platform>,
     /// `active.json` only: the active set differs from the preset it started from.
@@ -564,7 +564,7 @@ impl Shortcuts {
 
     // ---------------------------------------------------------------- presets
 
-    /// Default bindings of every known command, plus FilmCraft's panel shortcuts.
+    /// Default bindings of every known command, plus Joose Clip's panel shortcuts.
     fn base_defaults(&self) -> Vec<Binding> {
         let mut out = Vec::new();
         for c in self.commands() {
@@ -580,7 +580,7 @@ impl Shortcuts {
         out
     }
 
-    /// Premiere-default entries FilmCraft Default adopts: commands with no shortcut of their own
+    /// Premiere-default entries Joose Clip Default adopts: commands with no shortcut of their own
     /// whose Premiere key is free in that context on this platform.
     pub fn audit(&self) -> Vec<Binding> {
         self.audit_for(Platform::current())

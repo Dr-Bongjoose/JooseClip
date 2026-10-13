@@ -1,8 +1,8 @@
-# Where FilmCraft falls short of Premiere Pro
+# Where Joose Clip falls short of Premiere Pro
 
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (new file: ROADMAP's "Where we are lacking" re-measured against Premiere Pro 26.5.2 and the open issue list) · **Target:** Adobe Premiere Pro 2026 (26.5.2)
 
-Every known shortfall, one entry each, ranked by what most stops an editor using FilmCraft for real
+Every known shortfall, one entry each, ranked by what most stops an editor using Joose Clip for real
 work. This is the work list: agents should prefer it over adding checklist items. Numbers are in
 [target-app-parity.md](target-app-parity.md); estimates are Opus 5.5 agent-hours, calibrated there.
 When you close or shrink a gap, update its entry, its parity doc and the revision history.
@@ -39,7 +39,7 @@ platforms** G4, G9, G17; **performance** G16; **ecosystem** G11; **measurement**
 
 - **Missing:** a fidelity harness. Every effect, transition, Lumetri control, blend mode, keyframe
   interpolation and audio effect counts once it exists; nothing renders the same project in
-  Premiere and FilmCraft and compares frames or samples. Effects described as approximations
+  Premiere and Joose Clip and compares frames or samples. Effects described as approximations
   count the same as exact ones.
 - **Evidence:** catalogue tests check names and folders only. EffectCraft's live After Effects
   comparison (its gaps.md G1) found real bugs in features marked done on its first run.

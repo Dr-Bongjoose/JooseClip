@@ -1,6 +1,6 @@
 //! Community and project links (Help menu, About dialog, header Discord button, Home screen).
 //!
-//! Joose Clip is an independent fork of FilmCraft by the ArtCraft team: the fork lives on Joose
+//! Joose Clip is an independent fork of Joose Clip by the Joose Labs team: the fork lives on Joose
 //! Labs' own site and repository, and credits the upstream project.
 
 /// The app's short name, used in the website and repository URLs.
@@ -16,7 +16,7 @@ pub const APP_PAGE: &str = "https://jooselabs.com/joose-clip";
 pub const GITHUB: &str = "https://github.com/JooseLabs/joose-clip";
 /// New issue on Joose Clip's repository.
 pub const ISSUES: &str = "https://github.com/JooseLabs/joose-clip/issues";
-/// The upstream FilmCraft project (this fork's base). Linking the upstream is required by the
+/// The upstream Joose Clip project (this fork's base). Linking the upstream is required by the
 /// fork's attribution rules.
 pub const UPSTREAM: &str = "https://github.com/storytold/filmcraft";
 

@@ -5,7 +5,7 @@
 //! project as `<name>-YYYY-MM-DD_HH-MM-SS.fcproj`, keeping at most *Maximum Project Versions* files.
 //! Optionally the project file itself is saved too.
 //!
-//! **Recovery journal** (FilmCraft addition): while the project has unsaved changes, a snapshot is
+//! **Recovery journal** (Joose Clip addition): while the project has unsaved changes, a snapshot is
 //! written to `<data dir>/Recovery/<session>/snapshot.fcproj` shortly after each change (debounced,
 //! and at least every *N* seconds while edits keep coming). Each running app holds an OS lock on
 //! `<session>/lock`; when the process dies (crash, `kill -9`, power cut) the lock is released, so on
@@ -489,7 +489,7 @@ pub fn portable_data_dir(exe_dir: &Path) -> Option<PathBuf> {
 
 /// The data directory. `FILMCRAFT_DATA_DIR` overrides; a portable install ([`PORTABLE_MARKER`] next
 /// to the executable) uses `<exe dir>/data`; otherwise the per-user directory:
-/// macOS `~/Library/Application Support/FilmCraft`, Windows `%APPDATA%\FilmCraft`,
+/// macOS `~/Library/Application Support/Joose Clip`, Windows `%APPDATA%\Joose Clip`,
 /// elsewhere `$XDG_DATA_HOME/filmcraft` or `~/.local/share/filmcraft`.
 pub fn default_data_dir() -> Option<PathBuf> {
     let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);

@@ -35,7 +35,7 @@ pub(crate) fn fnv(s: &[u8], h: u64) -> u64 {
 }
 
 fn timestamp() -> Vec<u8> {
-    // 1970-01-01 00:00:00.00: FilmCraft writes reproducible files
+    // 1970-01-01 00:00:00.00: Joose Clip writes reproducible files
     let mut v = 1970i16.to_le_bytes().to_vec();
     v.extend_from_slice(&[1, 1, 0, 0, 0, 0]);
     v

@@ -5,7 +5,7 @@ written from the RFC. Layer L0: it depends only on `filmcraft-bitstream` and `th
 `unsafe`, and builds for `wasm32-unknown-unknown`.
 
 No libFLAC, FFmpeg or other FLAC implementation was read or ported. ffmpeg is used only as an
-external **test oracle** (decoding our streams). Decoding FLAC in FilmCraft is still done by the
+external **test oracle** (decoding our streams). Decoding FLAC in Joose Clip is still done by the
 symphonia bootstrap decoder in `filmcraft-codecs`.
 
 ## API
