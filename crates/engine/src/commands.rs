@@ -2451,22 +2451,32 @@ fn build() -> Vec<CommandSpec> {
         // Source panel: Close / Close All, for the clip shown and the list of recent clips (#313)
         cmd!("source.close", "Close", [], None, "{}", crate::source_monitor::has_source_clip, |s, _| crate::source_monitor::close(s, false)),
         cmd!("source.closeAll", "Close All", [], None, "{}", crate::source_monitor::has_source_clip, |s, _| crate::source_monitor::close(s, true)),
-        cmd!("source.setPlayhead", "Set Source Playhead", [], None, r#"{"time":ticks|"frame":i64|"seconds":f64}"#, always, |s, p| {
-            let item = s.state.source_item.ok_or_else(|| EngineError::Other("no source clip".into()))?;
-            let view = crate::clip_ops::source_view(s, item);
-            let rate = view.as_ref().map(|v| v.rate).unwrap_or_default();
-            let t = p
-                .get("time")
-                .and_then(Value::as_i64)
-                .map(Tick)
-                .or_else(|| p.get("frame").and_then(Value::as_i64).map(|f| rate.tick_of(f)))
-                .or_else(|| f64_p(p, "seconds").map(Tick::from_seconds_f64))
-                .unwrap_or_default();
-            // the Source monitor's span: a subclip that restricts trims keeps the playhead inside it
-            let (lo, hi) = view.map(|v| (v.start, v.end)).unwrap_or((Tick::ZERO, Tick::MAX));
-            s.state.source_playhead = rate.snap(t.clamp(lo, (hi - rate.frame_duration()).max(lo))).max(lo);
-            Ok(json!({"time": s.state.source_playhead.0}))
-        }),
+        CommandSpec {
+            id: "source.setPlayhead",
+            label: "Set Source Playhead",
+            menu: &[],
+            shortcut: None,
+            params: r#"{"time":ticks|"frame":i64|"seconds":f64}"#,
+            enabled: always,
+            run: |s, p| {
+                let item = s.state.source_item.ok_or_else(|| EngineError::Other("no source clip".into()))?;
+                let view = crate::clip_ops::source_view(s, item);
+                let rate = view.as_ref().map(|v| v.rate).unwrap_or_default();
+                let t = p
+                    .get("time")
+                    .and_then(Value::as_i64)
+                    .map(Tick)
+                    .or_else(|| p.get("frame").and_then(Value::as_i64).map(|f| rate.tick_of(f)))
+                    .or_else(|| f64_p(p, "seconds").map(Tick::from_seconds_f64))
+                    .unwrap_or_default();
+                // the Source monitor's span: a subclip that restricts trims keeps the playhead inside it
+                let (lo, hi) = view.map(|v| (v.start, v.end)).unwrap_or((Tick::ZERO, Tick::MAX));
+                s.state.source_playhead = rate.snap(t.clamp(lo, (hi - rate.frame_duration()).max(lo))).max(lo);
+                Ok(json!({"time": s.state.source_playhead.0}))
+            },
+            // playback clock ticks here (like `trim.tick`): playhead moves are not edits
+            journal: false,
+        },
         query!("source.inspect", "Inspect Source Monitor", "{}", |s, _| {
             let Some(item) = s.state.source_item else { return Ok(json!({"item": null})) };
             let v = crate::clip_ops::source_view(s, item).ok_or_else(|| bad("source.inspect", "the source item is gone"))?;
