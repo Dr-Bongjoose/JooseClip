@@ -97,7 +97,9 @@ pub(crate) fn dpx(rgba: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
     put32(&mut hd, 24, 1664); // generic header length
     put32(&mut hd, 28, 384); // industry header length
     put32(&mut hd, 32, 0); // user data length
-    hd[160..169].copy_from_slice(b"Joose Clip");
+    // project name: the spec's 32-byte field (offset 160) — zero-padded, name first
+    hd[160..192].fill(0);
+    hd[160..170].copy_from_slice(b"Joose Clip");
     // image information header
     put16(&mut hd, 768, 0); // orientation: left to right, top to bottom
     put16(&mut hd, 770, 1); // one image element
@@ -323,6 +325,8 @@ mod tests {
         // 2×1: pure red, then (1, 128, 255)
         let px = [255, 0, 0, 255, 1, 128, 255, 7];
         let f = dpx(&px, 2, 1).unwrap();
+        assert_eq!(b"Joose Clip", &f[160..170]); // project name in the spec's 32-byte field
+        assert!(f[170..192].iter().all(|b| *b == 0), "the rest of the field stays zero-padded");
         assert_eq!(&f[0..4], b"SDPX");
         assert_eq!(f.len(), 2048 + 8);
         assert_eq!(be32(&f, 4), 2048);
