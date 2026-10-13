@@ -138,6 +138,11 @@ pub struct HostHooks {
     pub system_languages: Option<Box<dyn Fn() -> Vec<String>>>,
     /// Open dialog for a JSON file (shortcut preset import): filter name, extensions → path.
     pub pick_open_file: Option<Box<dyn FnMut(&str, &[&str]) -> Option<String>>>,
+    /// Register the macOS window drag types winit does not ship (modern Finder promises file
+    /// URLs, winit registers the legacy filenames type only). Runs once on the first frame;
+    /// the window is then live for drag-import. Elsewhere: not installed, drop handling stays
+    /// winit's own.
+    pub mac_window_drop_types: Option<Box<dyn FnMut() -> Result<(), String>>>,
     /// Folder picker (Link Media search, proxy and Project Manager destinations).
     pub pick_folder: Option<Box<dyn FnMut() -> Option<String>>>,
     /// Folder picker starting at the current destination (Export Frame).
@@ -326,6 +331,8 @@ pub struct FilmcraftApp {
     input_waiters: Vec<Sender<Value>>,
     next_token: u64,
     styled: bool,
+    /// The macOS drop types registered (one attempt on the first frame).
+    drop_types_registered: bool,
     /// A panic in the UI pass, shown in an error window until dismissed (see [`crash`]).
     pub ui_error: Option<String>,
     /// The window runs in a fallback graphics mode (set by the desktop host): a notice with a
@@ -567,6 +574,7 @@ impl FilmcraftApp {
             input_waiters: Vec::new(),
             next_token: 1,
             styled: false,
+            drop_types_registered: false,
             ui_error: None,
             panic_next_frame: false,
             quit_confirmed: false,
@@ -2061,6 +2069,14 @@ impl eframe::App for FilmcraftApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // a native file dialog's answer first, so the panels draw what it chose (#260)
         self.poll_native_dialog(ctx);
+        if !self.drop_types_registered {
+            self.drop_types_registered = true; // one attempt; without the hook drop handling stays winit's own
+            if let Some(h) = self.hooks.mac_window_drop_types.as_mut()
+                && let Err(e) = h()
+            {
+                self.ui.status = e; // §0.1: a dead import path is reported, never silent
+            }
+        }
         if !self.styled {
             theme::install(ctx, &self.tokens);
             // theme::install replaces the fonts: add the system Japanese font back (or fall back to
