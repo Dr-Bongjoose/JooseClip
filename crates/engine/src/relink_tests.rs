@@ -76,7 +76,8 @@ fn moved_media_opens_offline_and_relinks_others_by_folder() {
     assert!(!s.offline.prompt);
     assert_eq!(frame_rgba(&mut s, 3, 1.0).2, online, "relinked media renders as before the move");
     let b_path = s.project.item(items[1]).unwrap().as_media().unwrap().media.clone();
-    assert_eq!(b_path, filmcraft_project::MediaRef::File { path: moved.join("b.mov").to_string_lossy().into_owned() });
+    let filmcraft_project::MediaRef::File { path: b_path } = b_path else { panic!("relinked media must remain file-based") };
+    assert_eq!(std::path::Path::new(&b_path), moved.join("b.mov"));
     // undo brings the old (missing) paths back, and the slate with them
     s.execute("edit.undo", json!({})).unwrap();
     assert!(psnr(&frame_rgba(&mut s, 3, 1.0).2, &slate) > 40.0);
@@ -128,6 +129,22 @@ fn fingerprint_mismatch_is_refused_unless_forced() {
 }
 
 #[test]
+fn forced_relink_takes_the_new_files_properties() {
+    let root = tmp_dir("relink-forced-info");
+    let (path, items) = saved_project(&root);
+    std::fs::remove_dir_all(root.join("Media")).unwrap();
+    // same name, different pictures and a different size
+    let other = root.join("Other");
+    std::fs::create_dir_all(&other).unwrap();
+    make_movie(&other.join("a.mov"), DemoScene::Dunes, W * 2, H * 2, 12);
+    let mut s = open(&path);
+    s.execute("media.relink", json!({"item": items[0].0, "path": other.join("a.mov").to_string_lossy(), "force": true, "relinkOthers": false})).unwrap();
+    let width = s.project.item(items[0]).and_then(|i| i.as_media()).and_then(|m| m.info.video.as_ref().map(|v| v.width));
+    assert_eq!(width, Some(W * 2), "the item describes the replacement file");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn make_offline_shows_the_slate_until_relinked() {
     let root = tmp_dir("relink-offline");
     let (path, items) = saved_project(&root);
@@ -143,5 +160,113 @@ fn make_offline_shows_the_slate_until_relinked() {
     let a = root.join("Media/a.mov").to_string_lossy().into_owned();
     s.execute("media.relink", json!({"item": items[0].0, "path": a})).unwrap();
     assert_eq!(frame_rgba(&mut s, 3, 1.0), online);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+// Regression test for issue #110: after `file.import` re-imports a file at a path the project
+// already listed as offline, `s.offline.missing` must drop that item so the slate and the
+// "Media missing" badge clear without reopening the project. Before the fix (the patch in
+// `file.import` that calls `crate::relink::refresh(s)`), the slate stayed stale until reopen
+// or per-item relink.
+#[test]
+fn reimport_clears_offline_list_after_path_resolves() {
+    let root = tmp_dir("relink-reimport");
+    let (path, items) = saved_project(&root);
+    let a = root.join("Media/a.mov");
+
+    // Delete a.mov so the saved project now points at a missing file, then reopen:
+    // `on_open` → `refresh` → `scan` registers items[0] as missing.
+    let online = frame_rgba(&mut open(&path), 3, 1.0);
+    std::fs::remove_file(&a).unwrap();
+    let mut s = open(&path);
+    assert!(s.offline.missing.contains(&items[0]), "setup: a.mov missing on reopen");
+    assert_ne!(frame_rgba(&mut s, 3, 1.0), online, "setup: the slate shows while a.mov is missing");
+
+    // Recreate the file at the exact path the project stores, then import. `file.import`
+    // must drop items[0] from `s.offline.missing`. Without the fix, the entry stays stale
+    // and the user has to reopen or `media.relink` each item.
+    make_movie(&a, DemoScene::Aurora, W, H, 12);
+    s.execute("file.import", json!({"paths": [a.to_string_lossy()]})).unwrap();
+    assert!(!s.offline.missing.contains(&items[0]), "issue #110 — file.import did not refresh s.offline.missing (still contains {:?})", s.offline.missing);
+    assert_eq!(s.execute("media.findMissing", json!({})).unwrap()["missing"].as_array().unwrap().len(), 0);
+    // and the monitors show the file again, not the cached slate
+    assert_eq!(frame_rgba(&mut s, 3, 1.0), online);
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn explicit_folder_remaps_normalize_both_prefixes_and_respect_boundaries() {
+    assert_eq!(apply_remap(r"C:\shoot\Media\a.mov", r"C:\shoot\Media\", r"D:\archive\Media\"), Some("D:/archive/Media/a.mov".into()));
+    assert_eq!(apply_remap("C:/shoot/Media/a.mov", r"C:\shoot\Media", r"D:\archive\Media"), Some("D:/archive/Media/a.mov".into()));
+    assert_eq!(apply_remap("C:/shoot/Media2/a.mov", r"C:\shoot\Media", r"D:\archive\Media"), None);
+}
+
+/// #1054: an export (or a rendered frame) that draws the offline slate names the offline items it
+/// used, with their status, so a headless caller can tell placeholder frames from real ones. Media
+/// outside the exported range is not reported.
+#[test]
+fn export_names_the_offline_media_it_rendered() {
+    let root = tmp_dir("relink-export-offline");
+    let (path, items) = saved_project(&root);
+    let out = |name: &str| root.join(name).to_string_lossy().into_owned();
+    let mut s = open(&path);
+    let r = s
+        .execute("file.exportMedia", json!({"path": out("on.png"), "format": "png", "range": "custom", "startSeconds": 0, "endSeconds": 0.05, "wait": true}))
+        .unwrap();
+    assert_eq!(r["offlineMedia"], json!([]), "{r}");
+    std::fs::remove_file(root.join("Media/a.mov")).unwrap();
+    let mut s = open(&path);
+    // b.mov (frames 12..24) is still there
+    let r = s
+        .execute("file.exportMedia", json!({"path": out("b.png"), "format": "png", "range": "custom", "startSeconds": 0.6, "endSeconds": 0.65, "wait": true}))
+        .unwrap();
+    assert_eq!(r["offlineMedia"], json!([]), "{r}");
+    let r = s.execute("file.exportMedia", json!({"path": out("all.wav"), "format": "wav", "wait": true})).unwrap();
+    let off = r["offlineMedia"].as_array().unwrap();
+    assert_eq!(off.len(), 1, "{r}");
+    assert_eq!(off[0]["item"], json!(items[0].0));
+    assert_eq!(off[0]["name"], json!("a.mov"));
+    assert_eq!(off[0]["status"], json!("missing"));
+    assert!(off[0]["path"].as_str().unwrap().ends_with("a.mov"), "{r}");
+    // made offline on purpose
+    s.execute("media.makeOffline", json!({"items": [items[1].0]})).unwrap();
+    let r = s
+        .execute("file.exportMedia", json!({"path": out("b2.png"), "format": "png", "range": "custom", "startSeconds": 0.6, "endSeconds": 0.65, "wait": true}))
+        .unwrap();
+    assert_eq!(
+        r["offlineMedia"].as_array().map(|a| a.iter().map(|o| (o["item"].clone(), o["status"].clone())).collect::<Vec<_>>()),
+        Some(vec![(json!(items[1].0), json!("offline"))]),
+        "{r}"
+    );
+    // the queue reports it per item
+    let r = s
+        .execute(
+            "export.queue.add",
+            json!({"path": out("q.png"), "format": "png", "range": "custom", "startSeconds": 0.6, "endSeconds": 0.65, "start": true, "wait": true}),
+        )
+        .unwrap();
+    assert_eq!(r["items"][0]["offlineMedia"][0]["status"], json!("offline"), "{r}");
+    // one rendered frame
+    let (_, off) = s.try_render_program_with_offline_at(0.5, s.sequence_rate().tick_of(3)).unwrap();
+    assert_eq!(off.iter().map(|o| (o.item, o.status)).collect::<Vec<_>>(), [(items[0].0, "missing")]);
+    let (_, off) = s.try_render_program_with_offline_at(0.5, s.sequence_rate().tick_of(30)).unwrap();
+    assert!(off.is_empty(), "nothing on the timeline there: {off:?}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// #1054: `jobs.list` carries an export job's `offlineMedia`, for callers that poll the job (the
+/// bridge and MCP long exports) instead of waiting in `file.exportMedia`.
+#[test]
+fn jobs_list_reports_an_exports_offline_media() {
+    let root = tmp_dir("relink-jobs-offline");
+    let (path, items) = saved_project(&root);
+    std::fs::remove_file(root.join("Media/b.mov")).unwrap();
+    let mut s = open(&path);
+    let out = root.join("all.wav").to_string_lossy().into_owned();
+    let job = s.execute("file.exportMedia", json!({"path": out, "format": "wav", "wait": true})).unwrap()["job"].clone();
+    let jobs = s.execute("jobs.list", json!({})).unwrap();
+    let j = jobs.as_array().unwrap().iter().find(|j| j["id"] == job).unwrap();
+    assert_eq!(j["offlineMedia"][0]["item"], json!(items[1].0), "{j}");
     let _ = std::fs::remove_dir_all(&root);
 }

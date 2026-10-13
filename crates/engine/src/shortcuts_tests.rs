@@ -74,6 +74,9 @@ fn defaults_follow_the_registry_and_the_premiere_audit() {
 #[test]
 fn assign_reassigns_conflicts_and_undoes() {
     let mut s = Session::default();
+    // macOS Control folds into the primary modifier on Linux/Windows, so compare changes
+    // against the platform's original conflicts rather than assuming the set starts empty.
+    let baseline = s.execute("shortcuts.conflicts", json!({})).unwrap()["conflicts"].clone();
     let r = s.execute("shortcuts.set", json!({"command": "edit.undo", "keys": "Cmd+Shift+K"})).unwrap();
     assert_eq!(r["reassigned"][0]["command"], json!("sequence.addEditAllTracks"), "{r}");
     assert!(s.shortcuts.primary("sequence.addEditAllTracks").is_none());
@@ -85,12 +88,12 @@ fn assign_reassigns_conflicts_and_undoes() {
     s.execute("shortcuts.set", json!({"command": "edit.undo", "keys": "Cmd+Z", "add": true})).unwrap();
     assert_eq!(s.shortcuts.for_command("edit.undo").iter().filter(|b| b.panel.is_none()).count(), 2);
     let r = s.execute("shortcuts.set", json!({"command": "edit.redo", "keys": "M", "keepConflicts": true})).unwrap();
-    assert_eq!(r["conflicts"].as_array().unwrap().len(), 1, "{r}");
+    assert_eq!(r["conflicts"].as_array().unwrap().len(), baseline.as_array().unwrap().len() + 1, "{r}");
     let c = s.execute("shortcuts.conflicts", json!({"platform": "mac"})).unwrap();
     assert_eq!(c["conflicts"][0]["keys"], json!("M"));
     // undo / redo within the editor
     s.execute("shortcuts.undo", json!({})).unwrap();
-    assert!(s.execute("shortcuts.conflicts", json!({})).unwrap()["conflicts"].as_array().unwrap().is_empty());
+    assert_eq!(s.execute("shortcuts.conflicts", json!({})).unwrap()["conflicts"], baseline);
     s.execute("shortcuts.undo", json!({})).unwrap();
     s.execute("shortcuts.undo", json!({})).unwrap();
     assert_eq!(s.shortcuts.primary("edit.undo").as_deref(), Some("Cmd+Z"));
@@ -108,6 +111,26 @@ fn assign_reassigns_conflicts_and_undoes() {
     s.execute("shortcuts.set", json!({"command": "edit.undo", "keys": "U"})).unwrap();
     s.shortcuts.cancel_editing();
     assert!(s.shortcuts.for_command("edit.undo").is_empty());
+}
+
+#[test]
+fn clear_close_sequence_also_clears_file_close() {
+    // #773: File ▸ Close (`file.close`, Cmd+W) aliases Close Sequence (`sequence.close`).
+    // The editor's Clear sends panel Application against `sequence.close`, which had only a
+    // Timeline binding — Cmd+W stayed on `file.close`.
+    let mut s = Session::default();
+    assert_eq!(s.shortcuts.primary("file.close").as_deref(), Some("Cmd+W"));
+    assert_eq!(s.shortcuts.primary("sequence.close").as_deref(), Some("Cmd+W"));
+    assert!(s.shortcuts.for_command("sequence.close").iter().any(|b| b.keys == "Cmd+W"));
+    let r = s.execute("shortcuts.clear", json!({"command": "sequence.close", "panel": "Application"})).unwrap();
+    assert!(r["removed"].as_u64().unwrap() >= 1, "{r}");
+    assert!(s.shortcuts.for_command("sequence.close").is_empty(), "{:?}", s.shortcuts.for_command("sequence.close"));
+    assert!(s.shortcuts.primary("file.close").is_none());
+    let w = Chord::parse("Cmd+W").unwrap();
+    assert!(s.shortcuts.resolve(&w, None, Platform::current()).is_none());
+    assert!(s.shortcuts.resolve(&w, Some("Timeline"), Platform::current()).is_none());
+    s.execute("shortcuts.set", json!({"command": "sequence.addEdit", "keys": "Cmd+W", "add": true})).unwrap();
+    assert_eq!(s.shortcuts.resolve(&w, None, Platform::current()).unwrap().command, "sequence.addEdit");
 }
 
 #[test]
@@ -130,6 +153,19 @@ fn panel_shortcuts_override_application_ones_with_focus() {
     assert!(!t.shortcuts.conflicts(Platform::Windows).is_empty() || t.shortcuts.for_command("edit.copy").len() == 2);
     let k = t.execute("shortcuts.forKey", json!({"key": "C"})).unwrap();
     assert!(k.as_array().unwrap().iter().any(|b| b["command"] == "edit.copy" && b["keys"] == "Ctrl+C"), "{k}");
+}
+
+#[test]
+fn delete_clears_timeline_clips_and_project_items() {
+    // #243: with the Timeline focused, Delete (the forward-delete key, labelled Delete on Windows
+    // and Linux keyboards) resolved to Project ▸ Clear and left the selected clips in place.
+    let s = Session::default();
+    let del = Chord::parse("Delete").unwrap();
+    for p in [Platform::Mac, Platform::Windows] {
+        assert_eq!(s.shortcuts.resolve(&del, Some("Timeline"), p).unwrap().command, "edit.clear", "{p:?}");
+        assert_eq!(s.shortcuts.resolve(&del, Some("Project"), p).unwrap().command, "project.delete", "{p:?}");
+        assert_eq!(s.shortcuts.resolve(&del, None, p).unwrap().command, "project.delete", "{p:?}");
+    }
 }
 
 #[test]
@@ -217,4 +253,22 @@ fn list_searches_labels_and_keys() {
     assert!(v.as_array().unwrap().iter().any(|c| c["id"] == "sequence.addEdit"), "{v}");
     let v = s.execute("shortcuts.list", json!({"panel": "History", "assigned": true})).unwrap();
     assert_eq!(v.as_array().unwrap().len(), 2, "{v}");
+}
+
+#[test]
+fn default_keymaps_have_no_conflicts_on_any_platform() {
+    // The Premiere audit used to check keys on macOS only, so off macOS `⌃9`/`⌘9`, `⌃⇧M`/`⌘⇧M` and
+    // `⌃T`/`⌘T` ended up on the same Ctrl key; CI only ran on macOS, so nobody saw it.
+    use crate::shortcuts::Platform;
+    let s = Session::default();
+    for p in [Platform::Mac, Platform::Windows, Platform::Linux] {
+        let mut sc = s.shortcuts.clone();
+        sc.bindings = sc.builtin_for(crate::shortcuts::DEFAULT_PRESET, p).unwrap();
+        assert!(sc.conflicts(p).is_empty(), "{p:?}: {:?}", sc.conflicts(p));
+    }
+    // macOS keeps every Premiere key it had
+    let mac = s.shortcuts.builtin_for(crate::shortcuts::DEFAULT_PRESET, Platform::Mac).unwrap();
+    for (cmd, keys) in [("multicam.cutToCamera9", "Ctrl+9"), ("markers.addRange", "Ctrl+Shift+M"), ("graphics.newText", "Cmd+T")] {
+        assert!(mac.iter().any(|b| b.command == cmd && b.keys == keys), "{cmd} {keys} on macOS");
+    }
 }

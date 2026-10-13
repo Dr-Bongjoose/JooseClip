@@ -268,3 +268,57 @@ fn clip_and_sequence_dialogs() {
     d.click("properties.ok");
     assert!(!d.dialog_open());
 }
+
+/// #29: File ▸ New ▸ Color Matte… asks for the color (and name, size, duration), and an existing
+/// matte's color can be changed afterwards (double-click in the Project panel, or
+/// `project.matteColor`), which used to leave every matte stuck at its first, dark grey color.
+#[test]
+fn color_matte_dialog_picks_and_changes_the_color() {
+    let mut d = Driver::new();
+    let matte_color = |d: &mut Driver, id: u64| match &d.app().session.project.item(ItemId(id)).unwrap().kind {
+        filmcraft_engine::project::ItemKind::Media(m) => match &m.media {
+            filmcraft_engine::project::MediaRef::Generator(filmcraft_media::Generator::ColorMatte { color }) => filmcraft_color::to_hex(*color),
+            g => panic!("not a matte: {g:?}"),
+        },
+        _ => panic!("not media"),
+    };
+    assert_eq!(d.menu("file.newColorMatte")["dialog"], "colorMatte");
+    for id in ["colorMatte.color", "colorMatte.name", "colorMatte.width", "colorMatte.height", "colorMatte.seconds", "colorMatte.ok"] {
+        assert!(d.has(id), "{id}");
+    }
+    d.ok("ui.set", json!({"menuDialog": {"color": "#ff8000", "name": "Orange"}}));
+    d.click("colorMatte.ok");
+    assert!(!d.dialog_open());
+    let orange = d.item_named("Orange");
+    assert_eq!(matte_color(&mut d, orange), "#ff8000");
+    // change it: the dialog starts from the current color
+    d.exec("project.select", json!({"items": [orange]}));
+    assert_eq!(d.menu("project.matteColor")["dialog"], "matteColor");
+    assert_eq!(d.app().ui.extras.dialog.as_ref().unwrap().params["color"], "#ff8000");
+    assert!(d.has("matteColor.color"));
+    d.ok("ui.set", json!({"menuDialog": {"color": "#2040c0"}}));
+    d.click("matteColor.ok");
+    assert_eq!(matte_color(&mut d, orange), "#2040c0");
+    // without a Color Matte selected there is nothing to change
+    let seq = d.app().session.state.active_sequence.unwrap().0;
+    d.exec("project.select", json!({"items": [seq]}));
+    assert_eq!(d.call("ui.menu.invoke", json!({"id": "project.matteColor"}))["ok"], json!(false));
+    assert!(!d.dialog_open());
+}
+
+#[test]
+fn reveal_in_finder_opens_an_imported_clip() {
+    let dir = std::env::temp_dir().join(format!("fc-ui-reveal-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("clip.png");
+    image::RgbaImage::from_pixel(8, 8, image::Rgba([10, 20, 30, 255])).save(&path).unwrap();
+    let mut d = Driver::new();
+    let item = d.exec("file.import", json!({"paths": [path.to_string_lossy()]}))["items"][0].as_u64().unwrap();
+    assert!(!d.app().session.is_enabled("file.reveal"));
+    d.exec("project.select", json!({"items": [item]}));
+    assert!(d.app().session.is_enabled("file.reveal"));
+    let r = d.ok("ui.menu.invoke", json!({"id": "file.reveal"}));
+    assert_eq!(r["paths"][0], path.to_string_lossy().as_ref());
+    assert_eq!(d.app().ui.extras.opened.last().map(String::as_str), Some(path.to_string_lossy().as_ref()));
+    let _ = std::fs::remove_dir_all(&dir);
+}

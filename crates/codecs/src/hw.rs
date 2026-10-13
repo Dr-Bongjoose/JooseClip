@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use filmcraft_isobmff::{CodecConfig, SampleEntry};
 
+pub use crate::hw_frame::{FrameCodec, FrameStreamInfo, PictureParams};
 use crate::video::{avcc_length_size, h264_disposable, hevc_disposable, hvcc_length_size_and_tid, sar_par, vui_color};
 use crate::{CodecError, Result};
 
@@ -27,6 +28,19 @@ pub fn set_hardware_decoding(on: bool) {
 /// Whether hardware decoders may be used for new decoders ([`set_hardware_decoding`]).
 pub fn hardware_decoding() -> bool {
     ENABLED.load(Ordering::Relaxed)
+}
+
+static BACKEND: std::sync::Mutex<Option<&'static str>> = std::sync::Mutex::new(None);
+
+/// Record the OS decoder backend `filmcraft_platform::register` put in front of our decoders
+/// ("VideoToolbox", "Media Foundation"), for `perf.stats`.
+pub fn set_hw_backend(name: &'static str) {
+    *BACKEND.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(name);
+}
+
+/// The registered hardware decoder backend, if any ([`set_hw_backend`]).
+pub fn hw_backend() -> Option<&'static str> {
+    *BACKEND.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Process-wide hardware decoding counters (they only grow; subtract two snapshots to measure an
@@ -120,6 +134,71 @@ pub struct NalStreamInfo {
     pub reorder: usize,
 }
 
+/// Any stream a hardware decoder can take: what [`crate::hw`]'s hybrid decoder needs to know about
+/// it to find restart points and in-band parameter changes.
+#[derive(Clone, Debug)]
+pub enum StreamInfo {
+    Nal(NalStreamInfo),
+    Frame(FrameStreamInfo),
+}
+
+impl From<NalStreamInfo> for StreamInfo {
+    fn from(i: NalStreamInfo) -> Self {
+        Self::Nal(i)
+    }
+}
+
+impl From<FrameStreamInfo> for StreamInfo {
+    fn from(i: FrameStreamInfo) -> Self {
+        Self::Frame(i)
+    }
+}
+
+impl StreamInfo {
+    /// Whether decoding can restart at `sample` with no earlier state (IDR / IRAP, a key frame).
+    pub fn is_irap(&self, sample: &[u8]) -> bool {
+        match self {
+            Self::Nal(i) => i.is_irap(sample),
+            Self::Frame(i) => i.is_random_access(sample),
+        }
+    }
+
+    /// An HEVC CRA restarts nothing by itself (its RASL pictures need the previous restart point).
+    pub fn keeps_previous_restart(&self, sample: &[u8]) -> bool {
+        match self {
+            Self::Nal(i) => i.codec == NalCodec::Hevc && i.nal_types(sample).contains(&21),
+            Self::Frame(_) => false,
+        }
+    }
+
+    /// Whether `sample` carries parameters different from the ones the hardware decoder was set up
+    /// with (parameter sets, a sequence header, a key frame of another format).
+    pub fn parameters_changed(&self, sample: &[u8]) -> bool {
+        match self {
+            Self::Nal(i) => {
+                i.nals(sample).into_iter().any(|n| n.first().is_some_and(|&h| i.is_parameter_set(i.nal_type(h))) && !i.parameter_sets.iter().any(|p| p == n))
+            }
+            Self::Frame(i) => i.parameters_changed(sample),
+        }
+    }
+
+    /// As the software decoder's [`crate::VideoDecoder::is_random_access`].
+    pub fn is_random_access(&self, sample: &[u8]) -> Option<bool> {
+        match self {
+            Self::Nal(i) => i.is_random_access(sample),
+            Self::Frame(i) => Some(i.is_random_access(sample)),
+        }
+    }
+
+    /// As the software decoder's [`crate::VideoDecoder::is_disposable`].
+    pub fn is_disposable(&self, sample: &[u8]) -> bool {
+        match self {
+            Self::Nal(i) => i.is_disposable(sample),
+            Self::Frame(_) => false,
+        }
+    }
+}
+
 /// Length-prefixed parameter-set entries (`u16` length + bytes) starting at `pos`.
 fn read_sets(rec: &[u8], pos: &mut usize, count: usize, out: &mut Vec<Vec<u8>>) -> Result<()> {
     for _ in 0..count {
@@ -179,7 +258,7 @@ impl NalStreamInfo {
             bit_depth_chroma: sps.bit_depth_chroma,
             interlaced: !sps.frame_mbs_only,
             profile_idc: sps.profile_idc,
-            color: vui_color(crop.2, crop.3, vui.matrix_coefficients, vui.transfer_characteristics, vui.full_range),
+            color: vui_color(crop.2, crop.3, vui.colour_primaries, vui.matrix_coefficients, vui.transfer_characteristics, vui.full_range),
             par: sar_par(vui.sar),
             // as the software decoder's DPB (`max_reorder`)
             reorder: sps.max_num_reorder_frames().min(sps.max_dpb_frames()),
@@ -225,7 +304,7 @@ impl NalStreamInfo {
             bit_depth_chroma: sps.bit_depth_chroma,
             interlaced: false,
             profile_idc: sps.ptl.profile_idc,
-            color: vui_color(crop.2, crop.3, vui.matrix_coefficients, vui.transfer_characteristics, vui.full_range),
+            color: vui_color(crop.2, crop.3, vui.colour_primaries, vui.matrix_coefficients, vui.transfer_characteristics, vui.full_range),
             par: sar_par(vui.sar),
             reorder: sps.max_num_reorder as usize,
         })

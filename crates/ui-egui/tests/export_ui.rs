@@ -141,6 +141,7 @@ fn export_mode_settings_and_summary() {
         "export.section.multiplexer",
         "export.video.matchSize",
         "export.video.bitrateMode",
+        "export.video.hardwareEncoding",
         "export.video.maxQuality",
         "export.audio.sampleRate",
         "export.range",
@@ -176,6 +177,78 @@ fn export_mode_settings_and_summary() {
     assert!(d.app().ui.export.settings.effects.loudness.enabled);
     assert!(d.has("export.effects.loudness.target"));
     d.snapshot("export-mode");
+}
+
+#[test]
+fn the_status_bar_and_the_queue_show_the_time_left() {
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+
+    use filmcraft_engine::Job;
+    use filmcraft_engine::export_tools::QueueStatus;
+    let mut d = Driver::new("eta");
+    d.ok("ui.set", json!({"mode": "export"}));
+    d.frames(3);
+    d.exec(
+        "export.queue.add",
+        json!({"preset": "Waveform Audio 48 kHz 16-bit", "path": d.path("eta.wav"), "range": "custom", "startSeconds": 0.0, "endSeconds": 0.25}),
+    );
+    // a job at 25 %, doing 50 units a second: 750 left, 15 s (readings from the near future, because
+    // the app reads the real clock, which is then behind them)
+    let job = Job { id: 900, label: "Exporting".into(), progress: Default::default(), result: Default::default() };
+    job.progress.total.store(1000, Ordering::Relaxed);
+    let t0 = web_time::Instant::now() + Duration::from_secs(60);
+    for i in 0..=50u64 {
+        job.progress.done.store(i * 5, Ordering::Relaxed);
+        job.progress.eta_at(t0 + Duration::from_millis(i * 100));
+    }
+    d.app().session.jobs.push(job);
+    {
+        let item = &mut d.app().session.export_queue.items[0];
+        item.status = QueueStatus::Encoding;
+        item.job = Some(900);
+    }
+    d.frames(4);
+    // the status bar says it next to the percentage, and agents read it from the same label
+    let label = d.ok("ui.elements", json!({"prefix": "status.job.progress"}))[0]["label"].as_str().unwrap().to_string();
+    assert_eq!(label, "25% · 15 s left");
+    // the queue item has it too
+    let item = d.queue().into_iter().next().unwrap();
+    assert!((item["etaSeconds"].as_f64().unwrap() - 15.0).abs() < 0.5, "{item}");
+    assert_eq!(item["status"], "encoding");
+    d.snapshot("export-eta");
+}
+
+#[test]
+fn h265_shows_the_h264_family_controls_without_the_h264_only_ones() {
+    use filmcraft_engine::export::{ExportSettings, Format};
+    let mut d = Driver::new("h265");
+    d.ok("ui.set", json!({"mode": "export"}));
+    d.frames(4);
+    // H.264, the default: profile, level and the hardware checkbox
+    for id in ["export.video.profile", "export.video.level", "export.video.hardwareEncoding", "export.video.bitrateMode"] {
+        assert!(d.has(id), "H.264: {id}");
+    }
+    d.app().ui.export.settings = ExportSettings { format: Format::Hevc, ..Default::default() };
+    d.frames(4);
+    for id in [
+        "export.video.bitrateMode",
+        "export.video.target",
+        "export.video.max",
+        "export.video.keyframeOn",
+        "export.section.multiplexer",
+        "export.section.audio",
+        "export.audio.sampleRate",
+    ] {
+        assert!(d.has(id), "H.265: {id}");
+    }
+    // Main is its only profile, the level is the encoder's choice, and hardware is the only encoder
+    for id in ["export.video.profile", "export.video.level", "export.video.hardwareEncoding"] {
+        assert!(!d.has(id), "H.265 has no {id}");
+    }
+    let sum = d.ok("ui.elements", json!({"prefix": "export.summary"}))[0]["label"].as_str().unwrap().to_string();
+    assert!(sum.contains("HEVC Main") && sum.contains("Target 20.00 Mbps"), "{sum}");
+    d.snapshot("export-h265");
 }
 
 #[test]
@@ -308,4 +381,63 @@ fn export_button_and_quick_export_popup() {
     assert!(d.app().ui.export.quick_open);
     d.click("quickExport.close");
     assert!(!d.app().ui.export.quick_open);
+}
+
+#[test]
+fn quick_export_file_name_can_be_typed_and_the_folder_link_opens_the_save_dialog() {
+    use std::sync::{Arc, Mutex};
+    let mut d = Driver::new("quick-location");
+    d.exec("markers.markIn", json!({"seconds": 0.0}));
+    d.exec("markers.markOut", json!({"seconds": 0.2}));
+    d.click("header.quickExport");
+    d.ok("ui.set", json!({"export": {"quickPreset": "Waveform Audio 48 kHz 16-bit"}}));
+    d.frames(2);
+    let start = PathBuf::from(&d.app().ui.export.quick_path);
+    assert_eq!(start.extension().unwrap(), "wav", "{start:?}");
+    // emptying the file name to retype it keeps what is typed instead of refilling the old name
+    d.click("quickExport.path");
+    d.ok("ui.key", json!({"key": "Cmd+A"}));
+    d.ok("ui.key", json!({"key": "Backspace"}));
+    d.frames(2);
+    d.ok("ui.type", json!({"text": "renamed"}));
+    d.frames(2);
+    let typed = PathBuf::from(&d.app().ui.export.quick_path);
+    assert_eq!(typed, start.parent().unwrap().join("renamed.wav"));
+    // the folder link asks the save dialog, seeded with the whole path; cancelling changes nothing
+    let asked: Arc<Mutex<Vec<(Vec<String>, String)>>> = Arc::default();
+    let answer: Arc<Mutex<Option<String>>> = Arc::default();
+    let (log, reply) = (asked.clone(), answer.clone());
+    d.app().hooks.pick_save_as = Some(Box::new(move |_, exts, suggested| {
+        log.lock().unwrap().push((exts.iter().map(|e| e.to_string()).collect(), suggested.to_string()));
+        reply.lock().unwrap().clone()
+    }));
+    d.click("quickExport.location");
+    assert_eq!(asked.lock().unwrap().clone(), [(vec!["wav".to_string()], typed.to_string_lossy().to_string())]);
+    assert_eq!(PathBuf::from(&d.app().ui.export.quick_path), typed);
+    assert!(d.app().ui.export.quick_open, "the popup stays open");
+    // a chosen path is applied and shown; another format's extension follows the preset
+    *answer.lock().unwrap() = Some(d.path("picked.mp4"));
+    d.click("quickExport.location");
+    let picked = d.path("picked.wav");
+    assert_eq!(d.app().ui.export.quick_path, picked);
+    let shown = d.ok("ui.elements", json!({"prefix": "quickExport.location"}))[0]["label"].as_str().unwrap().to_string();
+    assert_eq!(shown, d.dir.to_string_lossy());
+    d.snapshot("export-quick-location");
+    d.click("quickExport.go");
+    d.wait_until("quick export", |d| d.app().session.jobs.iter().all(|j| j.progress.finished.load(std::sync::atomic::Ordering::Relaxed)));
+    assert!(Path::new(&d.path("picked.wav")).exists(), "{}", d.app().ui.status);
+}
+
+#[test]
+fn export_mode_file_name_can_be_emptied_and_retyped() {
+    let mut d = Driver::new("file-name");
+    d.ok("ui.set", json!({"mode": "export"}));
+    d.frames(3);
+    d.click("export.fileName");
+    d.ok("ui.key", json!({"key": "Cmd+A"}));
+    d.ok("ui.key", json!({"key": "Backspace"}));
+    d.frames(2);
+    d.ok("ui.type", json!({"text": "Final"}));
+    d.frames(2);
+    assert_eq!(d.app().ui.export.file_name, "Final");
 }

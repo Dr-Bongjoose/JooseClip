@@ -1,6 +1,6 @@
 # Attribution
 
-Every non-code asset in Joose Clip (independent fork of FilmCraft), with its author, source and licence. Each file listed here also has
+Every non-code asset in FilmCraft, with its author, source and licence. Each file listed here also has
 a `<file>.attribution` sidecar with full details. The rules are in [AGENTS.md](AGENTS.md) §1: no Adobe
 iconography, images or other Adobe assets; open licences only; every asset attributed.
 `cargo xtask assets` checks that this index and the sidecars cover every asset in the repository.
@@ -9,6 +9,11 @@ iconography, images or other Adobe assets; open licences only; every asset attri
 
 | Asset | Author | Source | Licence |
 |---|---|---|---|
+| `crates/ui-egui/src/i18n/id.tsv` | FilmCraft contributors | Original work: clean-room Indonesian interface translations | MIT OR Apache-2.0 |
+| `crates/ui-egui/src/i18n/fr.tsv` | FilmCraft contributors | Original work: clean-room French interface translations | MIT OR Apache-2.0 |
+| `crates/ui-egui/src/i18n/pt-br.tsv` | FilmCraft contributors | Original work: clean-room Brazilian Portuguese interface translations | MIT OR Apache-2.0 |
+| `crates/ui-egui/src/i18n/ru.tsv` | FilmCraft contributors | Original work: clean-room Russian interface translations | MIT OR Apache-2.0 |
+| `crates/ui-egui/src/i18n/uk.tsv` | FilmCraft contributors | Original work: clean-room Ukrainian interface translations | MIT OR Apache-2.0 |
 | `assets/fonts/Inter-Regular.ttf` | The Inter Project Authors | https://github.com/rsms/inter | OFL-1.1 (`assets/fonts/OFL-Inter.txt`) |
 | `assets/fonts/Inter-Medium.ttf` | The Inter Project Authors | https://github.com/rsms/inter | OFL-1.1 (`assets/fonts/OFL-Inter.txt`) |
 | `assets/fonts/Inter-SemiBold.ttf` | The Inter Project Authors | https://github.com/rsms/inter | OFL-1.1 (`assets/fonts/OFL-Inter.txt`) |
@@ -25,23 +30,24 @@ iconography, images or other Adobe assets; open licences only; every asset attri
 | `docs/images/filmcraft-scopes.png` | FilmCraft contributors | Original work: FilmCraft UI crop (scopes of a Charade (1963) frame, public domain) | MIT OR Apache-2.0 |
 | `docs/images/filmcraft-effects.png` | FilmCraft contributors | Original work: FilmCraft screenshot crop; NASA Earth Views (US Government work, public domain) | MIT OR Apache-2.0; footage public domain |
 | `docs/images/filmcraft-timeline.png` | FilmCraft contributors | Original work: FilmCraft UI crop; thumbnails from Night of the Living Dead (1968) and Carnival of Souls (1962), CC0 Chopin waveform | MIT OR Apache-2.0; film frames public domain |
-| `assets/app-icon/joose-clip.svg` | Joose Labs | Original work: Joose Clip app icon (lowercase j with blue tittle and film-sprocket dots on a navy tile), drawn from scratch; canonical vector | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
-| `assets/app-icon/joose-clip-small.svg` | Joose Labs | Original work: Joose Clip app icon; lighter single-path vector | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
-| `assets/app-icon/joose-clip-1024.png` | Joose Labs | Original work: Joose Clip app icon; 1024 px render | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
-| `assets/app-icon/joose-clip-macos-512.png` | Joose Labs | Original work: Joose Clip app icon; 512 px render | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
-| `assets/app-icon/joose-clip.ico` | Joose Labs | Original work: Joose Clip app icon; Windows .ico (16-256 px) | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
-| `assets/app-icon/joose-clip-wordmark.png` | Joose Labs | Original work: Joose Clip wordmark lockup, light ink for dark UI | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
-| `assets/app-icon/joose-clip-wordmark-dark.png` | Joose Labs | Original work: Joose Clip wordmark lockup, dark ink for light UI | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
-| `assets/app-icon/hicolor/16x16/apps/com.jooselabs.jooseclip.png` | Joose Labs | Original work: Joose Clip app icon; Linux hicolor theme 16 px | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
-| `assets/app-icon/hicolor/24x24/apps/com.jooselabs.jooseclip.png` | Joose Labs | Original work: Joose Clip app icon; Linux hicolor theme 24 px | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
-| `assets/app-icon/hicolor/32x32/apps/com.jooselabs.jooseclip.png` | Joose Labs | Original work: Joose Clip app icon; Linux hicolor theme 32 px | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
-| `assets/app-icon/hicolor/48x48/apps/com.jooselabs.jooseclip.png` | Joose Labs | Original work: Joose Clip app icon; Linux hicolor theme 48 px | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
-| `assets/app-icon/hicolor/64x64/apps/com.jooselabs.jooseclip.png` | Joose Labs | Original work: Joose Clip app icon; Linux hicolor theme 64 px | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
-| `assets/app-icon/hicolor/128x128/apps/com.jooselabs.jooseclip.png` | Joose Labs | Original work: Joose Clip app icon; Linux hicolor theme 128 px | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
-| `assets/app-icon/hicolor/256x256/apps/com.jooselabs.jooseclip.png` | Joose Labs | Original work: Joose Clip app icon; Linux hicolor theme 256 px | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
-| `assets/app-icon/hicolor/512x512/apps/com.jooselabs.jooseclip.png` | Joose Labs | Original work: Joose Clip app icon; Linux hicolor theme 512 px | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
-| `assets/app-icon/hicolor/scalable/apps/com.jooselabs.jooseclip.svg` | Joose Labs | Original work: Joose Clip app icon; Linux hicolor theme scalable | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
-| `apps/filmcraft-web/web/favicon.png` | Joose Labs | Original work: Joose Clip app icon; 128 px web favicon | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
+| `assets/app-icon/filmcraft.svg` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; canonical vector | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
+| `packaging/macos/dmg/background.svg` | @XusBadia | Original work: FilmCraft macOS DMG window background, derived from the FilmCraft app icon (`assets/app-icon/filmcraft.svg`); rendered to `background.tiff` by `packaging/macos/dmg/generate.py` | MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`) |
+| `packaging/macos/dmg/background.tiff` | @XusBadia | Rendered from `packaging/macos/dmg/background.svg` by `packaging/macos/dmg/generate.py` | MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`) |
+| `assets/app-icon/filmcraft-small.svg` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; lighter vector | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
+| `assets/app-icon/filmcraft-1024.png` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; 1024 px render | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
+| `assets/app-icon/filmcraft-macos-512.png` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; macOS runtime Dock icon (512 px) | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
+| `assets/app-icon/filmcraft.icns` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; macOS .icns | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
+| `assets/app-icon/filmcraft.ico` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; Windows .ico (16-256 px) | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
+| `assets/app-icon/hicolor/16x16/apps/ai.storyteller.filmcraft.png` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; Linux hicolor theme 16 px | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
+| `assets/app-icon/hicolor/24x24/apps/ai.storyteller.filmcraft.png` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; Linux hicolor theme 24 px | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
+| `assets/app-icon/hicolor/32x32/apps/ai.storyteller.filmcraft.png` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; Linux hicolor theme 32 px | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
+| `assets/app-icon/hicolor/48x48/apps/ai.storyteller.filmcraft.png` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; Linux hicolor theme 48 px | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
+| `assets/app-icon/hicolor/64x64/apps/ai.storyteller.filmcraft.png` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; Linux hicolor theme 64 px | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
+| `assets/app-icon/hicolor/128x128/apps/ai.storyteller.filmcraft.png` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; Linux hicolor theme 128 px | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
+| `assets/app-icon/hicolor/256x256/apps/ai.storyteller.filmcraft.png` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; Linux hicolor theme 256 px | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
+| `assets/app-icon/hicolor/512x512/apps/ai.storyteller.filmcraft.png` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; Linux hicolor theme 512 px | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
+| `assets/app-icon/hicolor/scalable/apps/ai.storyteller.filmcraft.svg` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; Linux hicolor theme scalable | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
+| `apps/filmcraft-web/web/favicon.png` | Brandon Thomas (FilmCraft owner) | Original work: FilmCraft app icon (owl with ear tufts), drawn by the owner in ArtCraft and vectorised; 128 px | MIT OR Apache-2.0 (`assets/app-icon/LICENSE.txt`) |
 
 ## Golden test images
 
@@ -100,6 +106,7 @@ is traced or derived from Adobe artwork.
 | Asset | Where |
 |---|---|
 | UI icons (tools, transport, panels, header) | `crates/ui-egui/src/icons.rs`: vector paths on a 16×16 grid |
+| Source and Program range braces and trim hover cues | `crates/ui-egui/src/panels/monitor.rs` and `source_range.rs`: original generic vector shapes by FilmCraft contributors, MIT OR Apache-2.0; no third-party artwork |
 | Align / distribute / paragraph-alignment glyphs in the graphics panel | `crates/ui-egui/src/panels/graphics.rs` (`align_glyph`): bars and lines drawn with the egui painter |
 | Demo footage (ocean sunset, aurora, city night, dunes, forest, plasma), bars and tone, counting leader, colour matte | `crates/media/src/generators.rs` |
 | Built-in graphics templates (Lower Third – Slab / Rule, Ticker – Crawl, Title – Centered / Boxed, End Credits – Roll, Callout – Pointer / Tag) and their placeholder text | `crates/project/src/gtemplate.rs` (`builtin_templates`): original designs defined in code with the bundled Inter font; thumbnails are rendered at runtime, no template, image or font files |
@@ -122,13 +129,32 @@ carry each font's licence as `OFL-<family>.txt`.
 | Shippori Mincho Regular (FONTDASU) | Japanese fallback for serif titles (native builds) | OFL-1.1 |
 | BIZ UDMincho Regular (Morisawa) | Japanese fallback for serif titles (native builds) | OFL-1.1 |
 
-## Fork brand marks
+## First-party brand marks
 
-The Joose Clip app icon and wordmark (`assets/app-icon/joose-clip*`, `hicolor/`,
-`apps/filmcraft-web/web/favicon.png`) are original work drawn from scratch for this fork by
-Joose Labs, licensed MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`). The upstream
-FilmCraft icon and the ArtCraft trademarks are not used in this fork (upstream `AGENTS.md` §1.8
-requires forks to remove the ArtCraft marks; the rows they occupied were removed with the files).
+The ArtCraft name, wordmark and logos are trademarks of the ArtCraft Team. They are not open source and
+are not covered by the project licence; they may be used only unmodified and only in the context of
+FilmCraft, under [`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt). Forks and modified versions must
+remove them (AGENTS.md §1.8).
+
+| File | Author | Source | Licence |
+|---|---|---|---|
+| `docs/brand/artcraft-logo-white.png` | ArtCraft Team | Original work: first-party ArtCraft brand mark (ArtCraft wordmark, light ink for dark backgrounds) | ArtCraft trademark, not open source; `docs/brand/LICENSE-brand.txt` (not MIT/Apache) |
+| `docs/brand/artcraft-logo-white.svg` | ArtCraft Team | Original work: first-party ArtCraft brand mark (ArtCraft wordmark, light ink for dark backgrounds) | ArtCraft trademark, not open source; `docs/brand/LICENSE-brand.txt` (not MIT/Apache) |
+| `docs/brand/artcraft-logo.png` | ArtCraft Team | Original work: first-party ArtCraft brand mark (ArtCraft wordmark (symbol + "ARTCRAFT"), dark ink for light backgrounds) | ArtCraft trademark, not open source; `docs/brand/LICENSE-brand.txt` (not MIT/Apache) |
+| `docs/brand/artcraft-logo.svg` | ArtCraft Team | Original work: first-party ArtCraft brand mark (ArtCraft wordmark (symbol + "ARTCRAFT"), dark ink for light backgrounds) | ArtCraft trademark, not open source; `docs/brand/LICENSE-brand.txt` (not MIT/Apache) |
+| `docs/brand/artcraft-mark-black.png` | ArtCraft Team | Original work: first-party ArtCraft brand mark (ArtCraft symbol ("A" mark), black) | ArtCraft trademark, not open source; `docs/brand/LICENSE-brand.txt` (not MIT/Apache) |
+| `docs/brand/artcraft-mark-black.svg` | ArtCraft Team | Original work: first-party ArtCraft brand mark (ArtCraft symbol ("A" mark), black) | ArtCraft trademark, not open source; `docs/brand/LICENSE-brand.txt` (not MIT/Apache) |
+| `docs/brand/artcraft-mark.png` | ArtCraft Team | Original work: first-party ArtCraft brand mark (ArtCraft symbol ("A" mark), blue) | ArtCraft trademark, not open source; `docs/brand/LICENSE-brand.txt` (not MIT/Apache) |
+| `docs/brand/artcraft-mark.svg` | ArtCraft Team | Original work: first-party ArtCraft brand mark (ArtCraft symbol ("A" mark), blue) | ArtCraft trademark, not open source; `docs/brand/LICENSE-brand.txt` (not MIT/Apache) |
+
+## Third-party source code
+
+Source files that are transcribed from third-party code rather than written from scratch. Each keeps
+the original copyright and permission notice in its header.
+
+| File | Author | Source | Licence |
+|---|---|---|---|
+| `crates/platform/src/nvenc/ffi.rs` | NVIDIA Corporation (`nvEncodeAPI.h`); FilmCraft contributors (Rust transcription) | Structures (including `NV_ENC_CONFIG_HEVC` and its bit-field masks, `NV_ENC_PIC_PARAMS_HEVC`, `NV_ENC_SEI_PAYLOAD`, `NV_ENC_TIME_CODE`), function table, codec / profile GUIDs (H.264, HEVC Main, HEVC Main 10) and constants (`NV_ENC_LEVEL_HEVC_*`, tier, CU size, `NV_ENC_BUFFER_FORMAT_YUV420_10BIT`, `NV_ENC_CAPS_SUPPORT_10BIT_ENCODE`, BT.2020 / PQ / HLG VUI codes) transcribed from `nvEncodeAPI.h`, NVIDIA Video Codec SDK, API 12.1 (https://developer.nvidia.com/video-codec-sdk) | MIT (Copyright (c) 2010-2023 NVIDIA Corporation; notice kept in the file header) |
 
 ## Downloaded at runtime
 
@@ -140,3 +166,18 @@ SHA-256 (`crates/speech/src/models.rs`, `docs/transcripts.md`).
 | Asset | Author | Source | Licence |
 |---|---|---|---|
 | Whisper tiny / base / small speech-recognition weights (`model.safetensors`, `config.json`, `generation_config.json`, `tokenizer.json`) | OpenAI | `https://huggingface.co/openai/whisper-{tiny,base,small}` (revisions `169d4a43…`, `e37978b9…`, `973afd24…`); weights released with `https://github.com/openai/whisper` | MIT (weights and code, github.com/openai/whisper); the Hugging Face conversion is labelled Apache-2.0 |
+
+## Fork-specific assets (Joose Clip)
+
+Added by the fork; the icon licence lives at `assets/app-icon/JOOSE-ICON-LICENSE.txt`.
+
+| Asset | Author | Source | Licence |
+|---|---|---|---|
+| `assets/app-icon/joose-clip.svg` | Joose Labs | Original work: Joose Clip app icon (lowercase j with blue tittle and film-sprocket dots on a navy tile), drawn from scratch; canonical vector | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
+| `assets/app-icon/joose-clip-small.svg` | Joose Labs | Original work: Joose Clip app icon; lighter single-path vector | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
+| `assets/app-icon/joose-clip-1024.png` | Joose Labs | Original work: Joose Clip app icon; 1024 px render | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
+| `assets/app-icon/joose-clip-macos-512.png` | Joose Labs | Original work: Joose Clip app icon; 512 px render | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
+| `assets/app-icon/joose-clip.ico` | Joose Labs | Original work: Joose Clip app icon; Windows .ico (16-256 px) | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
+| `assets/app-icon/joose-clip-wordmark.png` | Joose Labs | Original work: Joose Clip wordmark lockup, light ink for dark UI | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
+| `assets/app-icon/joose-clip-wordmark-dark.png` | Joose Labs | Original work: Joose Clip wordmark lockup, dark ink for light UI | MIT OR Apache-2.0 (`assets/app-icon/JOOSE-ICON-LICENSE.txt`) |
+The Joose Clip app icon and wordmark (`assets/app-icon/joose-clip*`, `hicolor/`,

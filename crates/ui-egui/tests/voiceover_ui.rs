@@ -75,6 +75,23 @@ impl Driver {
 }
 
 #[test]
+fn a_failed_take_can_be_discarded_from_the_settings_dialog() {
+    let mut d = Driver::demo();
+    d.exec("audio.voiceover.start", json!({"track":"A1","time":0,"preroll":0}));
+    let blocker = std::env::temp_dir().join(format!("filmcraft-voiceover-ui-blocker-{}", std::process::id()));
+    std::fs::write(&blocker, b"not a directory").unwrap();
+    let failure = d.call("engine.execute", json!({"command":"audio.voiceover.stop","params":{"seconds":1,"dir":blocker}}));
+    assert_eq!(failure["ok"], false);
+    assert!(d.harness.state().session.voiceover.recording());
+    d.ok("ui.menu.invoke", json!({"id":"voiceover.settingsDialog"}));
+    d.frames(4); // Allow the newly anchored window to settle before using its button rectangle.
+    d.click("voiceover.discard");
+    assert!(!d.harness.state().session.voiceover.recording(), "{}", d.harness.state().ui.status);
+    d.exec("file.newProject", json!({}));
+    std::fs::remove_file(blocker).unwrap();
+}
+
+#[test]
 fn settings_dialog_from_the_track_header_persists_on_ok() {
     let mut d = Driver::demo();
     assert!(d.ids("timeline.track.A1.voiceover").contains(&"timeline.track.A1.voiceover".to_string()));
@@ -155,5 +172,26 @@ fn microphone_button_records_onto_its_track() {
     d.click(&format!("timeline.track.{label}.voiceover"));
     assert!(d.exec("audio.voiceover.settings", json!({}))["recording"].is_null());
     assert_eq!(d.ok("ui.inspect", json!({}))["playback"]["playing"], json!(false));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn recording_past_the_end_of_the_timeline_starts_there_not_at_the_beginning() {
+    let mut d = Driver::demo();
+    let dir = std::env::temp_dir().join(format!("filmcraft-vo-ui-end-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    d.exec("file.projectSettings.scratchDisks", json!({"captured": dir.to_string_lossy()}));
+    d.exec("audio.voiceover.settings", json!({"prerollSeconds": 0.5}));
+    d.harness.state_mut().session.prefs.timeline.return_to_beginning = true;
+    // far beyond the last clip: empty timeline
+    d.exec("playhead.set", json!({"seconds": 10_000.0}));
+    d.click("timeline.track.A2.voiceover");
+    let rec = d.exec("audio.voiceover.settings", json!({}))["recording"].clone();
+    assert!(rec.is_object(), "recording started: {rec}");
+    let ps = d.ok("ui.inspect", json!({}));
+    assert_eq!(ps["playback"]["playing"], json!(true));
+    let playhead = ps["playhead"].as_i64().unwrap();
+    assert!(playhead > 9_000 * 254_016_000_000i64, "playhead jumped back to {playhead}");
+    d.click("timeline.track.A2.voiceover");
     let _ = std::fs::remove_dir_all(&dir);
 }
