@@ -479,7 +479,27 @@ impl GopCache {
         // after the guard on every return path: dropping a decoder can block (a hardware session
         // waits for its frames in flight) and must not hold this cache's lock.
         let mut released: Vec<Box<dyn VideoDecoder>> = Vec::new();
-        let mut st = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        // A contended cache must not park a rayon worker on this std mutex: the holder runs
+        // global-pool joins inside the decode (`store` -> `finish` -> `rotate_plane`, JOO-237)
+        // and every worker parked here is dead weight rayon cannot use — a batch whose frames
+        // all miss this source then freezes forever. Short holds (a frame stored a moment ago)
+        // are worth a bounded retry; a hold long enough to starve a join means a GOP of
+        // decoding: decode this frame with a private decoder instead (the mirror of the
+        // nested-request rule) and never block on the shared state.
+        let mut contended = 0usize;
+        let mut st = loop {
+            match self.shared.state.try_lock() {
+                Ok(g) => break g,
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    contended += 1;
+                    if contended > 8 {
+                        return self.private_frame(s, i, want_pts, n);
+                    }
+                    std::thread::yield_now();
+                }
+                Err(std::sync::TryLockError::Poisoned(e)) => break std::sync::PoisonError::into_inner(e),
+            }
+        };
         let _decoding = DecodingGuard::enter(me);
         st.last_used = Instant::now();
         if let Some(f) = st.cached(want_pts, draft) {
@@ -606,7 +626,8 @@ impl GopCache {
                 }
                 key = s.sync_before(key - 1);
             }
-            d.reset();
+            // d is fresh here (a private request's own decoder): no reset needed, and none
+            // counted — a restart counter that counted new decoders would say nothing.
             *next = key;
         }
         let limit = (i + 64).min(n);
@@ -1060,5 +1081,122 @@ mod tests {
             assert!(matches!(&f.data, filmcraft_frame::PixelData::Rgba8(d) if d.iter().all(|&b| b == i as u8)), "frame {i} has its own pixels");
         }
         assert!(reused() - before >= more as u64 - 2, "{} of {more} planes recycled", reused() - before);
+    }
+
+    /// One long GOP (`n` samples, no sync sample after the first) whose decoder spins while the
+    /// gate is armed: it models the holder decoding mid-GOP under the cache lock, and every
+    /// batch request after it missing (frame-threaded decoders park nobody; this waits).
+    struct Held {
+        n: usize,
+        armed: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    /// The decoder of [`Held`]: every instance spins while the gate is armed (a private fallback
+    /// decoder included, released by the same gate) and emits one picture per sample, big enough
+    /// for the rotation (`rotated` → `rotate_plane`) to queue global-pool work.
+    struct HeldDec {
+        armed: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl VideoSamples for Held {
+        fn count(&self) -> usize {
+            self.n
+        }
+        fn pts(&self, i: usize) -> i64 {
+            i as i64 * 1000
+        }
+        fn sync_before(&self, _i: usize) -> usize {
+            0
+        }
+        fn sample_at(&self, t: i64) -> Option<usize> {
+            let i = (t / 1000) as usize;
+            (i < self.n).then_some(i)
+        }
+        fn read(&self, _i: usize) -> crate::Result<Vec<u8>> {
+            Ok(vec![0])
+        }
+        fn make_decoder(&self) -> crate::Result<Box<dyn VideoDecoder>> {
+            Ok(Box::new(HeldDec { armed: self.armed.clone() }))
+        }
+    }
+
+    impl VideoDecoder for HeldDec {
+        fn decode(&mut self, _sample: &[u8], pts: i64) -> crate::Result<Vec<DecodedFrame>> {
+            let i = (pts / 1000).rem_euclid(256) as u8;
+            while self.armed.load(Ordering::Relaxed) {
+                std::hint::spin_loop();
+            }
+            Ok(vec![DecodedFrame { pts, frame: VideoFrame::rgba8(256, 64, vec![i; 256 * 64 * 4]), draft: false }])
+        }
+        fn flush(&mut self) -> Vec<DecodedFrame> {
+            Vec::new()
+        }
+        fn reset(&mut self) {}
+        fn name(&self) -> &str {
+            "held"
+        }
+    }
+
+    #[test]
+    fn a_contended_render_batch_does_not_park_rayon_workers_on_the_cache() {
+        use rayon::iter::{IntoParallelIterator, ParallelIterator};
+
+        // Regression (JOO-237): an export batch whose frames all miss one source froze forever.
+        // The batch's worker threads parked on the cache's std mutex INSIDE the rayon pool —
+        // dead weight the pool cannot schedule with — while the holder, decoding a long GOP
+        // under the same lock then rotation-caching it (`store` → `finish` → `rotated`), waited
+        // on a global-pool join the parked workers were expected to steal: a circular wait no
+        // thread could break (moov never written, the CLI alive, every h264 worker idle).
+        // A contended request now decodes privately and never parks (the mirror of the
+        // nested-request rule).
+        let armed = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let s = Arc::new(Held { n: 64, armed: armed.clone() });
+        let c = Arc::new(GopCache::new(None).with_rotation(1));
+        // A pre-fix run freezes with the whole pool parked. The watchdog proves it instead of
+        // wedging the suite: a normal assertion would have no thread left to execute it.
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        std::thread::scope(|scope| {
+            let watchdog = done.clone();
+            scope.spawn(move || {
+                for _ in 0..300 {
+                    if watchdog.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                eprintln!("JOO-237 watchdog: the render batch did not finish within 30 s (a worker parked on the cache lock)");
+                std::process::exit(97);
+            });
+            // The holder: a pool-foreign thread that takes the lock, decodes sample 0 under it
+            // (spinning while armed), and then rotates the stored frame (pool joins).
+            let (hc, hs) = (c.clone(), s.clone());
+            scope.spawn(move || {
+                let f = hc.frame(&*hs, 0).expect("holder frame");
+                assert_eq!(index_of(&f), 0, "holder frame");
+            });
+            // Let every worker of the batch pile up on the lock first.
+            std::thread::sleep(Duration::from_millis(150));
+            // The gate opens from a pool-foreign thread: while the batch runs, the batch owns
+            // the pool; nothing else may be scheduled from it.
+            let gate = armed.clone();
+            scope.spawn(move || {
+                std::thread::sleep(Duration::from_millis(400));
+                gate.store(false, Ordering::Relaxed);
+            });
+            // The render batch: every frame of it misses the one source; none of its workers
+            // may park (they decode privately instead), so the whole batch and the holder's
+            // queued rotation join finish.
+            let finished = AtomicUsize::new(0);
+            (0..64usize).into_par_iter().for_each(|k| {
+                let f = c.frame(&*s, k as i64 * 1000).expect("batch frame");
+                assert_eq!(index_of(&f) % 256, k, "frame {k}");
+                finished.fetch_add(1, Ordering::Relaxed);
+            });
+            assert_eq!(finished.load(Ordering::Relaxed), 64, "every batch frame rendered");
+            // disarm while still inside the scope: the scope itself joins this watchdog thread,
+            // so a flag set after the scope could never release it
+            done.store(true, Ordering::Relaxed);
+        });
+        done.store(true, Ordering::Relaxed);
     }
 }

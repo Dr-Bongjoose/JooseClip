@@ -41,3 +41,6 @@ symphonia = { version = "0.5.5", default-features = false, features = ["aac", "m
 
 [dev-dependencies]
 filmcraft-testkit = { workspace = true }
+# the regression test drives the render batch over the rayon GLOBAL pool (where a pre-fix
+# contended cache froze the export: its workers parked on the cache's std mutex)
+rayon = { workspace = true }
