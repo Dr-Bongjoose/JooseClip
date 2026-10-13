@@ -134,14 +134,14 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     uic!("mode.import", "Import", [], None),
     uic!("mode.edit", "Edit", [], None),
     uic!("mode.export", "Export", ["File", "Export"], Some("Cmd+M")),
-    uic!("help.discord", "Join the Joose Labs chat…", ["Help"], None),
-    uic!("help.website", "Joose Labs Website", ["Help"], None),
-    uic!("help.appPage", "Joose Clip on jooselabs.com", ["Help"], None),
-    uic!("help.github", "Joose Clip on GitHub", ["Help"], None),
+    uic!("help.discord", "Join the ArtCraft Discord…", ["Help"], None),
+    uic!("help.website", "ArtCraft Website", ["Help"], None),
+    uic!("help.appPage", "FilmCraft on getartcraft.com", ["Help"], None),
+    uic!("help.github", "FilmCraft on GitHub", ["Help"], None),
     uic!("help.reportIssue", "Report an Issue…", ["Help"], None),
     uic!("help.revealLogFiles", "Reveal Log Files…", ["Help"], None),
     uic!("help.systemCompatibilityReport", "System Compatibility Report…", ["Help"], None),
-    uic!("app.about", "About Joose Clip", ["Help"], None),
+    uic!("app.about", "About FilmCraft", ["Help"], None),
     uic!("app.keyboardShortcuts", "Keyboard Shortcuts…", ["Edit"], Some("Cmd+Alt+K")),
     uic!("app.settings.general", "General…", ["Edit", "Preferences"], Some("Cmd+,")),
     uic!("app.settings.appearance", "Appearance…", ["Edit", "Preferences"], None),
@@ -331,8 +331,7 @@ pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params:
             return Ok(json!({"playing": app.source_playback.clock.playing}));
         }
         "playback.toggle" => {
-            // Space plays the monitor in focus (the Source monitor's own clip when focused there)
-            app.toggle_focused(1.0);
+            app.toggle_play(1.0);
             return Ok(json!({"playing": app.playback.playing}));
         }
         // L / J: pressing again in the same direction doubles the speed, up to 8×
