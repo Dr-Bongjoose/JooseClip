@@ -47,17 +47,10 @@ modules:
     build-commands:
       - install -Dm755 bin/filmcraft /app/bin/filmcraft
       - install -Dm755 bin/filmcraft-cli /app/bin/filmcraft-cli
-<<<<<<< HEAD:packaging/linux/flatpak/com.jooselabs.jooseclip.bundle.yml
       - install -Dm644 share/applications/com.jooselabs.jooseclip.desktop /app/share/applications/com.jooselabs.jooseclip.desktop
-      # The same MIME file the deb/rpm install (no types of its own yet; the runtime's
-      # shared-mime-info already knows the video and audio formats).
-      - install -Dm644 share/mime/packages/com.jooselabs.jooseclip.xml /app/share/mime/packages/com.jooselabs.jooseclip.xml
-=======
-      - install -Dm644 share/applications/ai.storyteller.filmcraft.desktop /app/share/applications/ai.storyteller.filmcraft.desktop
       # The same MIME file the deb/rpm install: it defines the .fcproj project type (the
       # runtime's shared-mime-info already knows the video and audio formats).
-      - install -Dm644 share/mime/packages/ai.storyteller.filmcraft.xml /app/share/mime/packages/ai.storyteller.filmcraft.xml
->>>>>>> upstream/main:packaging/linux/flatpak/ai.storyteller.filmcraft.bundle.yml
+      - install -Dm644 share/mime/packages/com.jooselabs.jooseclip.xml /app/share/mime/packages/com.jooselabs.jooseclip.xml
       # Already has the release's version and date substituted by package.sh.
       - install -Dm644 share/metainfo/com.jooselabs.jooseclip.metainfo.xml /app/share/metainfo/com.jooselabs.jooseclip.metainfo.xml
       - mkdir -p /app/share/icons /app/share/doc && cp -R share/icons/hicolor /app/share/icons/ && cp -R share/doc/filmcraft /app/share/doc/

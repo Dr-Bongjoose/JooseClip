@@ -1137,7 +1137,7 @@ fn loudness_normalization_corrects_limiter_loss_and_bounds_impossible_targets() 
 }
 
 /// 32-bit integer and float audio in every container that takes them, read back by ffprobe (an
-/// external oracle) and, where FilmCraft imports the format, by FilmCraft's own readers.
+/// external oracle) and, where Joose Clip imports the format, by Joose Clip's own readers.
 #[test]
 fn thirty_two_bit_audio_in_every_container() {
     let (p, seq, m) = matte([0.0, 0.0, 0.0, 1.0], 64, 36, Some(-6.0));
@@ -1160,7 +1160,7 @@ fn thirty_two_bit_audio_in_every_container() {
         assert!(s.supports_sample_format(sf), "{name}");
         export(&p, seq, &s, &m, &Progress::default()).unwrap_or_else(|e| panic!("{name}: {e}"));
         let bytes = std::fs::read(&path).unwrap();
-        // FilmCraft's own importer: the -6 dB tone at a peak of 0.5
+        // Joose Clip's own importer: the -6 dB tone at a peak of 0.5
         if !matches!(format, Format::MxfOp1a) {
             let src = filmcraft_codecs::open_bytes(name, bytes.into()).unwrap_or_else(|e| panic!("{name}: {e}"));
             let a = src.audio(0, 24_000, 48_000).unwrap();
@@ -1300,7 +1300,7 @@ fn sample_format_settings_round_trip_summary_and_estimate() {
     assert!(flac.starts_with("FLAC (lossless) 32-bit"), "{flac}");
 }
 
-/// FilmCraft imports its own 32-bit FLAC (symphonia rejected the frame header's 32-bit size code
+/// Joose Clip imports its own 32-bit FLAC (symphonia rejected the frame header's 32-bit size code
 /// as reserved: "unsupported media"), at full scale and with noise, sample for sample.
 #[test]
 fn own_importer_reads_32_bit_flac_at_full_scale() {

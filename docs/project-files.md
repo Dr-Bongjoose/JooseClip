@@ -136,7 +136,7 @@ Project Settings ▸ Scratch Disks can send auto-saves (Project Auto Save), rend
 Previews), captured and generated media (Captured Audio and Video, also the default for proxies)
 and audio previews to another folder. A folder named in a project file is used only when it is
 inside the project's own folder or was chosen in Scratch Disks on this computer (remembered in
-`autoSave.scratchFolders`). Otherwise FilmCraft uses the default location and says so when the
+`autoSave.scratchFolders`). Otherwise Joose Clip uses the default location and says so when the
 project opens. Folders on another computer or a device are never used.
 
 Preferences are stored in `<data dir>/preferences.json`. The `prefs.*` commands read and change them.
@@ -156,7 +156,7 @@ Premiere's auto-save can lose up to one interval of work. Joose Clip also keeps 
   Recover unsaved changes from 2026-10-01 00:02:09?"*, with the buttons **Recover**, **Not Now** and
   **Discard**. Stale directories without a snapshot are removed. Journals of running sessions are
   never touched.
-- If discarding a recovery session fails, FilmCraft reports the error and keeps that session and
+- If discarding a recovery session fails, Joose Clip reports the error and keeps that session and
   the remaining candidates in the recovery list for retry. Sessions already deleted stay removed.
 - Recovering loads the snapshot as an **unsaved** project with its original path, so Save writes
   over the original file. The recovered state goes into the new session's own journal before the old

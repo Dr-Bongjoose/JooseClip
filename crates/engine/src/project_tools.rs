@@ -993,7 +993,7 @@ pub fn previews_dir_for(project: &Project, path: &str, chosen: &[String]) -> std
 }
 
 /// The Scratch Disks folder `dir` from the settings of the project saved at `project_path`, if
-/// FilmCraft may write there: a folder chosen in Project Settings ▸ Scratch Disks on this computer
+/// Joose Clip may write there: a folder chosen in Project Settings ▸ Scratch Disks on this computer
 /// (`chosen`, kept in the preferences), or a folder inside the project's own folder. Other folders
 /// named in a project file, and paths [`crate::doc_path::resolve`] refuses (other computers,
 /// devices), give None: the default location.
@@ -1045,7 +1045,7 @@ pub(crate) fn remember_scratch_folders(s: &mut Session, dirs: &[String]) {
 }
 
 /// Log and tell the user once when the project just opened names Scratch Disks folders that
-/// FilmCraft will not write to (see [`trusted_scratch`]).
+/// Joose Clip will not write to (see [`trusted_scratch`]).
 pub(crate) fn warn_untrusted_scratch(s: &mut Session) {
     let sc = &s.project.settings.scratch;
     let ignored: Vec<String> = [&sc.auto_save, &sc.video_previews, &sc.captured, &sc.audio_previews]

@@ -857,7 +857,7 @@ pub fn bindings(app: &FilmcraftApp) -> Vec<KeyBinding> {
     v.extend(shifted);
     // `+` is the `=` key with Shift on US layouts and its own key on others and the keypad: a chord
     // on `=` takes it too, unless something is bound to `+` itself. Otherwise Ctrl+Plus fell
-    // through to egui's interface zoom while Ctrl+- and Ctrl+0 were taken by FilmCraft
+    // through to egui's interface zoom while Ctrl+- and Ctrl+0 were taken by Joose Clip
     // shortcuts, so the interface grew and could not shrink back (#2253).
     let plus: Vec<KeyBinding> = v
         .iter()
@@ -1023,7 +1023,7 @@ fn menu_entry(ui: &mut egui::Ui, it: &MenuItem, auto: &mut crate::automation::Re
         b = b.shortcut_text(shortcut_text(s));
     }
     let mut r = ui.add_enabled(it.enabled, b);
-    // Help items say whether they open the web browser (and which address) or stay in FilmCraft
+    // Help items say whether they open the web browser (and which address) or stay in Joose Clip
     if let Some(hint) = crate::links::menu_hint(&it.id) {
         r = r.on_hover_text(hint);
     }

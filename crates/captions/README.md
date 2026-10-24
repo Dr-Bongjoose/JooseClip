@@ -44,7 +44,7 @@ TTaf1 draft namespaces. Agent IDs use `xml:id`, except in the April draft, which
 `id`. Agent definitions from unrelated application metadata are ignored. Recognized `ttm:agent`
 attributes take precedence over the legacy local-name `agent` fallback. A full name is preferred,
 otherwise the first nonempty name (or an explicitly empty name) is used. Multiple agent references become one display label, joined with `, ` in
-reference order; the project does not retain the individual agent identities. Older FilmCraft
+reference order; the project does not retain the individual agent identities. Older Joose Clip
 files without agent definitions remain readable through the previous underscore-to-space
 fallback. Other agent metadata, including actor relationships, is not retained.
 

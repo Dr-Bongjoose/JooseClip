@@ -106,10 +106,10 @@ $Portable = Join-Path $TargetDir "windows-package\filmcraft-$Version-windows-$Ar
 Remove-Item -Recurse -Force $Portable -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Portable | Out-Null
 Copy-Item (Join-Path $Stage '*.exe') $Portable
-# The marker that makes FilmCraft keep its data in .\data next to the exe instead of %APPDATA% (#139).
+# The marker that makes Joose Clip keep its data in .\data next to the exe instead of %APPDATA% (#139).
 Set-Content -Encoding ascii -Path (Join-Path $Portable 'portable.txt') -Value @(
-  'FilmCraft portable: preferences, presets, logs and crash recovery are kept in the data folder',
-  'next to filmcraft.exe. Delete this file to use %APPDATA%\FilmCraft instead.'
+  'Joose Clip portable: preferences, presets, logs and crash recovery are kept in the data folder',
+  'next to filmcraft.exe. Delete this file to use %APPDATA%\Joose Clip instead.'
 )
 foreach ($f in 'README.md', 'LICENSE', 'LICENSE-MIT', 'LICENSE-APACHE') {
   $p = Join-Path $Root $f

@@ -74,7 +74,7 @@ for the active picture format. This backing is created only when a reference is 
 on geometry or plane-depth changes, and released on flush. Jobs still reading an older format keep
 its rows alive. Each backing retains the full coded picture dimensions.
 
-Draft mode (`Decoder::set_draft(true)`; FilmCraft enables it with Settings ▸ Playback ▸ Draft
+Draft mode (`Decoder::set_draft(true)`; Joose Clip enables it with Settings ▸ Playback ▸ Draft
 decoding while the Program monitor plays at 1/2 or 1/4): sub-layer non-reference pictures
 (TRAIL_N, RASL_N, ...) of the highest temporal sub-layer — no later picture predicts from them,
 and TMVP reads only reference pictures — skip deblocking and SAO and are flagged
