@@ -39,8 +39,9 @@ cargo xtask web --serve 8765                          # the web app on http://12
 | Variable | Effect |
 |---|---|
 | `FILMCRAFT_CONTROL_PORT` | Same as `--control <port>` |
+| `FILMCRAFT_CONTROL_TOKEN` | Required for `--control`: 64 random hex characters, inherited by authorized clients; [setup](control-protocol.md) |
 | `FILMCRAFT_CPU_COMPOSITE=1` | Disables the GPU compositor |
-| `FILMCRAFT_DEV_DESKTOP_ENTRY=1` | Linux, opt-in: a run from a source tree installs a user-level desktop entry (and the icons from `assets/app-icon`) so the taskbar shows the Joose Clip icon. Nothing is written without it; packaged runs never write one |
+| `FILMCRAFT_DEV_DESKTOP_ENTRY=1` | Linux, opt-in: a run from a source tree installs a user-level desktop entry (and the icons from `assets/app-icon`) so the taskbar shows the FilmCraft icon. Nothing is written without it; packaged runs never write one |
 | `FILMCRAFT_DATA_DIR` | Same as `--data-dir <dir>`: auto-save, crash recovery, settings and logs |
 | `RUST_LOG` | Log levels for standard error and the log file (see [Logs](#logs)) |
 
@@ -55,7 +56,7 @@ playback and codec speed, use `--release`.
 
 The desktop app writes its `log` records to standard error and to `Logs/filmcraft.log` in the data
 directory (`~/.local/share/filmcraft/Logs/` or `$XDG_DATA_HOME/filmcraft/Logs/` on Linux,
-`~/Library/Application Support/Joose Clip/Logs/` on macOS, `%APPDATA%\Joose Clip\Logs\` on Windows,
+`~/Library/Application Support/FilmCraft/Logs/` on macOS, `%APPDATA%\FilmCraft\Logs\` on Windows,
 or under `--data-dir` / `FILMCRAFT_DATA_DIR`), next to the crash logs; Help ▸ Reveal Log Files opens
 the folder. A start from a desktop menu or the Dock has no terminal, so this file is what to attach
 to a bug report: GPU compositor fallbacks, audio output problems, panicked frame jobs and container
@@ -63,7 +64,7 @@ warnings all land there. Each launch moves the previous log to `filmcraft.1.log`
 `filmcraft.2.log`), so the log of a run that crashed survives the next start. The file stops growing
 at 16 MiB. `--help`, `--version` and command-line errors write no file.
 
-By default Joose Clip's own crates log at `info` and everything else at `warn`. `RUST_LOG` replaces
+By default FilmCraft's own crates log at `info` and everything else at `warn`. `RUST_LOG` replaces
 that with env_logger-style directives, for example `RUST_LOG=debug`,
 `RUST_LOG=warn,filmcraft_codecs=trace` or `RUST_LOG=info,wgpu_core=warn`; a directive ending in `*`
 covers every target starting with it (`filmcraft*=debug`). The logger is
@@ -87,8 +88,9 @@ resolve from there. `crates/text/build.rs` reads its `fonts/manifest.txt` and em
 Regular, to keep the wasm small). The Japanese ones become the last fallback of every UI font family
 (`crates/ui-egui/src/theme.rs`, BIZ UDPGothic first) and fallback faces in the text engine (Gothic
 for sans text, Mincho for serif text). Without `CRAFT_FONTS_DIR`, `CRAFT_FONTS` is empty and
-Joose Clip uses its bundled and system fonts. A `CRAFT_FONTS_DIR` that is not a checkout is a build
-warning, or an error with `CRAFT_FONTS_REQUIRED=1` (release builds set both). Tests on these fonts'
+FilmCraft uses its bundled and system fonts. A `CRAFT_FONTS_DIR` that is not a checkout is a build
+warning, or an error with `CRAFT_FONTS_REQUIRED=1` (release builds set both). With
+`CRAFT_FONTS_REQUIRED=1`, a build without `CRAFT_FONTS_DIR` is an error too. Tests on these fonts'
 glyphs skip when it is empty; when you touch fonts, run the gates both with and without it.
 
 Chinese media names and track labels use the `Hans` / `Hant` craft-fonts faces after the Japanese
@@ -116,11 +118,11 @@ Every commit must pass all of these:
 |---|---|
 | Format | `cargo fmt --check` (`rustfmt.toml`: `max_width = 160`) |
 | Lints | `cargo clippy --workspace --all-targets -- -D warnings` |
-| Tests | `cargo test --workspace` |
+| Tests | `cargo nextest run --workspace` ([cargo-nextest](https://nexte.st), or `cargo test --workspace`), then `cargo test --workspace --doc` |
 | Layering | `cargo xtask layers` |
 | Assets | `cargo xtask assets` |
 | wasm | `cargo xtask wasm` (checks every L0–L4 crate, `filmcraft-ui-egui` and `filmcraft-web` for `wasm32-unknown-unknown`) |
-| All of the above | `cargo xtask ci` (runs clippy and tests with `--release`) |
+| All of the above | `cargo xtask ci` |
 
 Run them with `CRAFT_FONTS_DIR` set too when you change font code ([craft-fonts](#building-with-craft-fonts)).
 
@@ -271,7 +273,7 @@ In short:
   traced or "inspired-by" copies.
 - Open licences only (MIT, Apache-2.0, BSD, ISC, zlib, OFL, CC0, CC BY, CC BY-SA, or your own
   work under MIT OR Apache-2.0). No NC or ND licences. If the licence is unclear, leave the asset out.
-- Screenshots show only Joose Clip (or other open projects) with media we generated or that is
+- Screenshots show only FilmCraft (or other open projects) with media we generated or that is
   openly licensed.
 
 - **Fonts live in [storytold/craft-fonts](https://github.com/storytold/craft-fonts), not here.**

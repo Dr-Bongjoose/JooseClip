@@ -83,7 +83,7 @@ fn audio_starts(file: &MkvFile, bytes: &crate::Src, ti: usize, rate: i64) -> Vec
     let out_rate = u32::try_from(rate).unwrap_or(0);
     let frame = match &t.codec {
         Codec::Aac { asc } => fixed_packet_samples(FixedFrames::Aac(asc), &[], out_rate),
-        Codec::Mp3 | Codec::Mp2 => fixed_packet_samples(FixedFrames::MpegAudio, &first(), out_rate),
+        Codec::Mp3 | Codec::Mp2 | Codec::Mp1 => fixed_packet_samples(FixedFrames::MpegAudio, &first(), out_rate),
         Codec::Ac3 => fixed_packet_samples(FixedFrames::Ac3, &first(), out_rate),
         Codec::Eac3 => fixed_packet_samples(FixedFrames::Eac3, &first(), out_rate),
         _ => None,
@@ -231,7 +231,7 @@ fn vp9_config(private: &[u8], v: Option<&filmcraft_matroska::VideoInfo>) -> VpcC
         }
         p += 2 + len;
     }
-    if let Some(col) = v.and_then(|v| v.colour.as_ref()) {
+    if let Some(col) = v.and_then(|v| v.color.as_ref()) {
         if let Some(t) = col.transfer_characteristics {
             c.transfer_characteristics = t as u8;
         }
@@ -265,7 +265,7 @@ fn sample_entry(c: &Codec, private: &[u8], v: Option<&filmcraft_matroska::VideoI
 }
 
 /// HDR static metadata from the Matroska `Colour` element.
-fn hdr_metadata(c: &filmcraft_matroska::Colour) -> Option<filmcraft_color::HdrMetadata> {
+fn hdr_metadata(c: &filmcraft_matroska::Color) -> Option<filmcraft_color::HdrMetadata> {
     if c.mastering.is_none() && c.max_cll.is_none() && c.max_fall.is_none() {
         return None;
     }
@@ -285,7 +285,7 @@ fn hdr_metadata(c: &filmcraft_matroska::Colour) -> Option<filmcraft_color::HdrMe
 fn color_of(v: &filmcraft_matroska::VideoInfo, w: u32, h: u32, stream: Option<ColorCodes>) -> (ColorInfo, bool) {
     // H.273 code points; `Range`: 1 broadcast (limited), 2 full, 0 / 3 not signalled here
     let code = |c: Option<u64>| c.unwrap_or(2);
-    let container = v.colour.as_ref().map(|col| {
+    let container = v.color.as_ref().map(|col| {
         let range = match col.range {
             Some(1) => Some(false),
             Some(2) => Some(true),
@@ -317,7 +317,7 @@ fn codec_label(c: &Codec) -> String {
         Codec::Flac { .. } => "FLAC".into(),
         Codec::Pcm { bits, float, .. } => format!("PCM {bits}-bit{}", if *float { " float" } else { "" }),
         Codec::Mp3 => "MP3".into(),
-        Codec::Mp2 => "MPEG Audio".into(),
+        Codec::Mp2 | Codec::Mp1 => "MPEG Audio".into(),
         Codec::Other(id) if id == "V_MPEG2" => "MPEG-2 Video".into(),
         Codec::Other(id) if id == "V_MPEG1" => "MPEG-1 Video".into(),
         other => other.name().to_string(),
@@ -404,7 +404,7 @@ impl MkvSource {
                 color,
                 has_alpha: v.alpha_mode != 0,
                 bitrate,
-                hdr: v.colour.as_ref().and_then(hdr_metadata),
+                hdr: v.color.as_ref().and_then(hdr_metadata),
             }
         });
         let audio_streams: Vec<AudioStreamInfo> = atracks
@@ -486,6 +486,7 @@ impl MkvSource {
             Codec::Opus { head } => PacketDecoder::opus(filmcraft_opus::OpusHead::parse(head).map_err(|e| CodecError::Unsupported(format!("Opus: {e}")))?),
             Codec::Mp3 => PacketDecoder::new(CODEC_TYPE_MP3, rate, None),
             Codec::Mp2 => PacketDecoder::mpeg_audio(2, rate),
+            Codec::Mp1 => PacketDecoder::mpeg_audio(1, rate),
             Codec::Ac3 | Codec::Eac3 => PacketDecoder::ac3(),
             // symphonia wants the STREAMINFO block body: skip `fLaC` + the 4-byte block header.
             Codec::Flac { private } => PacketDecoder::new(CODEC_TYPE_FLAC, rate, private.get(8..42).map(<[u8]>::to_vec)),
