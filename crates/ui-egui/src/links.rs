@@ -1,28 +1,25 @@
 //! Community and project links (Help menu, About dialog, header Discord button, Home screen).
 //!
-//! Joose Clip is an independent fork of Joose Clip by the Joose Labs team: the fork lives on Joose
-//! Labs' own site and repository, and credits the upstream project.
+//! Joose Clip is part of the Joose Labs family: the community lives on the Joose Labs Discord, every
+//! app has a page on the Joose Labs website and a public GitHub repository.
 
 /// The app's short name, used in the website and repository URLs.
-pub const APP: &str = "joose-clip";
+pub const APP: &str = "filmcraft";
 
-/// The Joose Labs community chat (placeholder until the fork has its own room).
-pub const DISCORD: &str = "https://jooselabs.com/";
-/// The fork's website.
+/// The Joose Labs community Discord.
+pub const DISCORD: &str = "https://jooselabs.com";
+/// The Joose Labs website.
 pub const WEBSITE: &str = "https://jooselabs.com";
 /// Joose Clip's page on the Joose Labs website.
-pub const APP_PAGE: &str = "https://jooselabs.com/joose-clip";
+pub const APP_PAGE: &str = "https://jooselabs.com/apps/filmcraft";
 /// Joose Clip's source repository.
-pub const GITHUB: &str = "https://github.com/JooseLabs/joose-clip";
+pub const GITHUB: &str = "https://github.com/storytold/filmcraft";
 /// New issue on Joose Clip's repository.
-pub const ISSUES: &str = "https://github.com/JooseLabs/joose-clip/issues";
-/// The upstream Joose Clip project (this fork's base). Linking the upstream is required by the
-/// fork's attribution rules.
-pub const UPSTREAM: &str = "https://github.com/storytold/filmcraft";
+pub const ISSUES: &str = "https://github.com/storytold/filmcraft/issues";
 
 /// (command id, label, url) for every link, in menu order.
 pub const ALL: [(&str, &str, &str); 5] = [
-    ("help.discord", "Join the Joose Labs chat…", DISCORD),
+    ("help.discord", "Join the Joose Labs Discord…", DISCORD),
     ("help.website", "Joose Labs Website", WEBSITE),
     ("help.appPage", "Joose Clip on jooselabs.com", APP_PAGE),
     ("help.github", "Joose Clip on GitHub", GITHUB),
@@ -53,6 +50,7 @@ pub fn menu_hint(command: &str) -> Option<String> {
             "help.revealLogFiles" => tl!("Saves this session's log and shows it in your file manager."),
             "help.systemCompatibilityReport" => tl!("Shows a report on this computer."),
             "app.about" => tl!("Shows the version, community links and credits in a Joose Clip window."),
+            "app.checkForUpdates" => tl!("Looks for a newer Joose Clip release and offers to update."),
             _ => return None,
         }
         .to_string(),
@@ -87,7 +85,7 @@ pub fn show_failed(app: &mut crate::FilmcraftApp, ctx: &egui::Context) {
     let mut close = false;
     let mut elems: Vec<(&str, egui::Rect, String)> = Vec::new();
     egui::Window::new(tl!("Couldn't open your web browser"))
-        .id(egui::Id::new("failed-link"))
+        .id(egui::Id::unique("failed-link"))
         .collapsible(false)
         .resizable(false)
         .pivot(egui::Align2::CENTER_CENTER)
@@ -100,7 +98,7 @@ pub fn show_failed(app: &mut crate::FilmcraftApp, ctx: &egui::Context) {
             ui.label(tl!("Open this address in your browser yourself:"));
             ui.horizontal(|ui| {
                 let mut text = link.url.as_str();
-                let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(340.0));
+                let r = crate::widgets::accessible_name(ui.add(egui::TextEdit::singleline(&mut text).desired_width(340.0)), "Link address");
                 elems.push(("failedLink.url", r.rect, link.url.clone()));
                 let c = ui.button(tl!("Copy"));
                 elems.push(("failedLink.copy", c.rect, "Copy".into()));
@@ -128,9 +126,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn urls_follow_the_joose_scheme() {
-        assert_eq!(APP_PAGE, format!("{WEBSITE}/{APP}"));
-        assert_eq!(GITHUB, format!("https://github.com/JooseLabs/{APP}"));
+    fn urls_follow_the_artcraft_scheme() {
+        assert_eq!(APP_PAGE, format!("{WEBSITE}/apps/{APP}"));
+        assert_eq!(GITHUB, format!("https://github.com/storytold/{APP}"));
         assert!(ALL.iter().all(|(id, _, u)| id.starts_with("help.") && u.starts_with("https://")));
         assert_eq!(url_for("help.discord"), Some(DISCORD));
         assert_eq!(url_for("help.nope"), None);
