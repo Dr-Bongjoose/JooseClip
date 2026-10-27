@@ -72,7 +72,7 @@ still lands at its out point. CDP sequence counters advance per emitted packet, 
 Export work and output size therefore follow the scheduled caption data, not the time between
 cues or their duration (#2811). Empty-frame insertion is an optional MCC export behavior; see
 [EZTitles' MCC export documentation, "Write empty frames"](https://eztitles.com/Webhelp/EZTitles/export_subtitles_cc_mcc.htm).
-FilmCraft does not offer continuous padding for consumers that require a packet on every video frame.
+Joose Clip does not offer continuous padding for consumers that require a packet on every video frame.
 
 Regression tests cover sparse output, both caption streams individually and together, drop-frame
 and non-drop timecodes, exact cue round trips, and timestamps near the tick storage limit.

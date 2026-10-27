@@ -189,5 +189,5 @@ pub(crate) const EXPORT_SAVE_DIALOGS: [(&str, &str, &str); 7] = [
     ("file.exportFcpxml", "FCPXML", "fcpxml"),
     ("file.exportOtio", "OpenTimelineIO", "otio"),
     ("file.exportAle", "Avid Log Exchange", "ale"),
-    ("file.exportSelectionProject", "FilmCraft Project", "fcproj"),
+    ("file.exportSelectionProject", "Joose Clip Project", "fcproj"),
 ];

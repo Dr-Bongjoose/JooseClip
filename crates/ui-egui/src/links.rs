@@ -1,28 +1,28 @@
 //! Community and project links (Help menu, About dialog, header Discord button, Home screen).
 //!
-//! FilmCraft is part of the ArtCraft family: the community lives on the ArtCraft Discord, every
-//! app has a page on the ArtCraft website and a public GitHub repository.
+//! Joose Clip is part of the Joose Labs family: the community lives on the Joose Labs Discord, every
+//! app has a page on the Joose Labs website and a public GitHub repository.
 
 /// The app's short name, used in the website and repository URLs.
 pub const APP: &str = "filmcraft";
 
-/// The ArtCraft community Discord.
-pub const DISCORD: &str = "https://discord.gg/artcraft";
-/// The ArtCraft website.
-pub const WEBSITE: &str = "https://getartcraft.com";
-/// FilmCraft's page on the ArtCraft website.
-pub const APP_PAGE: &str = "https://getartcraft.com/apps/filmcraft";
-/// FilmCraft's source repository.
+/// The Joose Labs community Discord.
+pub const DISCORD: &str = "https://jooselabs.com";
+/// The Joose Labs website.
+pub const WEBSITE: &str = "https://jooselabs.com";
+/// Joose Clip's page on the Joose Labs website.
+pub const APP_PAGE: &str = "https://jooselabs.com/apps/filmcraft";
+/// Joose Clip's source repository.
 pub const GITHUB: &str = "https://github.com/storytold/filmcraft";
-/// New issue on FilmCraft's repository.
+/// New issue on Joose Clip's repository.
 pub const ISSUES: &str = "https://github.com/storytold/filmcraft/issues";
 
 /// (command id, label, url) for every link, in menu order.
 pub const ALL: [(&str, &str, &str); 5] = [
-    ("help.discord", "Join the ArtCraft Discord…", DISCORD),
-    ("help.website", "ArtCraft Website", WEBSITE),
-    ("help.appPage", "FilmCraft on getartcraft.com", APP_PAGE),
-    ("help.github", "FilmCraft on GitHub", GITHUB),
+    ("help.discord", "Join the Joose Labs Discord…", DISCORD),
+    ("help.website", "Joose Labs Website", WEBSITE),
+    ("help.appPage", "Joose Clip on jooselabs.com", APP_PAGE),
+    ("help.github", "Joose Clip on GitHub", GITHUB),
     ("help.reportIssue", "Report an Issue…", ISSUES),
 ];
 
@@ -39,7 +39,7 @@ pub fn url_for(command: &str) -> Option<&'static str> {
 }
 
 /// What a Help menu item does, shown when the pointer rests on it: the address a link opens in
-/// the web browser, or that the item stays inside FilmCraft.
+/// the web browser, or that the item stays inside Joose Clip.
 pub fn menu_hint(command: &str) -> Option<String> {
     let url = if command == "help.filmcraftHelp" { Some(crate::panels::keyboard::HELP_URL) } else { url_for(command) };
     if let Some(url) = url {
@@ -49,8 +49,8 @@ pub fn menu_hint(command: &str) -> Option<String> {
         match command {
             "help.revealLogFiles" => tl!("Saves this session's log and shows it in your file manager."),
             "help.systemCompatibilityReport" => tl!("Shows a report on this computer."),
-            "app.about" => tl!("Shows the version, community links and credits in a FilmCraft window."),
-            "app.checkForUpdates" => tl!("Looks for a newer FilmCraft release and offers to update."),
+            "app.about" => tl!("Shows the version, community links and credits in a Joose Clip window."),
+            "app.checkForUpdates" => tl!("Looks for a newer Joose Clip release and offers to update."),
             _ => return None,
         }
         .to_string(),

@@ -97,7 +97,7 @@ pub struct HostHooks {
     /// uses `egui::Context::system_theme`.
     pub system_theme: Option<SystemThemeFn>,
     /// Files or an image on the system clipboard, for Paste in the Timeline and the Project panel
-    /// (#611). Without it Paste only pastes clips copied in FilmCraft.
+    /// (#611). Without it Paste only pastes clips copied in Joose Clip.
     pub clipboard_media: Option<Box<dyn FnMut() -> Option<ClipboardMedia>>>,
 }
 

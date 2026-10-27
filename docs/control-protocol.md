@@ -224,7 +224,7 @@ four-way handle where two dividers meet, `panel.float.<index>.gutter.<path>` and
 The panels use craft-ui's shared docking with its split-tree settings. Its control commands
 (`window.panel.move`, `.float`, `.dock`, `.activate`, `.close`, `.closeGroup`, `.closeOthers`,
 `.minimize`, `.layout`; see craft-libs `docs/ui-docking.md`) route here too; the three
-commands above are FilmCraft's names for `window.panel.float`, `.dock` and `.close`.
+commands above are Joose Clip's names for `window.panel.float`, `.dock` and `.close`.
 
 `window.dockAction` accepts `{action}` using the shared docking action's JSON form. It
 covers tab moves and ordering, split and floating geometry, activation, and closing.

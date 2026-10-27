@@ -1,4 +1,4 @@
-//! The FilmCraft egui frontend.
+//! The Joose Clip egui frontend.
 //!
 //! Thin by design: all project changes go through `filmcraft_engine::Session::execute`; this crate
 //! owns only presentation state ([`state::UiState`]), GPU textures, the playback clock and the

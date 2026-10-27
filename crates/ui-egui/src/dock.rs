@@ -1,4 +1,4 @@
-//! FilmCraft's panels and workspaces. craft-ui's docking owns the frame tree, the tab strips,
+//! Joose Clip's panels and workspaces. craft-ui's docking owns the frame tree, the tab strips,
 //! floating windows and gestures (`dock_ui.rs` draws it); this module names the
 //! panels, builds the built-in workspaces and draws the Timeline's sequence tabs.
 
@@ -130,7 +130,7 @@ impl PanelKind {
     }
 }
 
-/// A FilmCraft panel arrangement: craft-ui's frame tree and floating windows.
+/// A Joose Clip panel arrangement: craft-ui's frame tree and floating windows.
 pub type Layout = craft_ui::docking::Layout<PanelKind>;
 /// What a saved workspace stores: its layout, closed panels and lock.
 pub type Workspace = craft_ui::docking::Workspace<PanelKind>;
@@ -161,7 +161,7 @@ pub struct WorkspacePrefs {
 
 /// A named workspace. `workspace` is a craft-ui [`Workspace`] kept as JSON, so one unreadable
 /// entry (a panel a newer version added) doesn't lose the others. Files written before
-/// FilmCraft used craft-ui workspaces hold a frame tree in `layout` and floating groups in
+/// Joose Clip used craft-ui workspaces hold a frame tree in `layout` and floating groups in
 /// `floating` instead; [`saved_workspace`] reads them. [`SavedWorkspace::new`] writes
 /// `workspace`, and also `layout` and `floating` while every floating window is one tab
 /// group, so that earlier versions still open the workspace.
@@ -258,7 +258,7 @@ pub fn saved_docking(prefs: &WorkspacePrefs, name: &str) -> Layout {
     saved_workspace(prefs, name).layout
 }
 
-/// The frame tree and floating groups FilmCraft wrote before its workspaces were craft-ui
+/// The frame tree and floating groups Joose Clip wrote before its workspaces were craft-ui
 /// [`Workspace`]s.
 mod legacy {
     use super::{Floating, Layout, Node, PanelKind, SplitAxis, SplitSize};
@@ -500,7 +500,7 @@ fn workspace_root(name: &str) -> Node<PanelKind> {
     }
 }
 
-/// FilmCraft's queries and changes on a [`Layout`] beyond craft-ui's actions.
+/// Joose Clip's queries and changes on a [`Layout`] beyond craft-ui's actions.
 pub trait LayoutExt {
     /// Whether `panel` is the shown tab of its frame or floating window.
     fn is_visible(&self, panel: PanelKind) -> bool;
@@ -874,7 +874,7 @@ mod tests {
         assert_eq!(d.root, Some(hsplit(SplitSize::Ratio(0.5), tabs(&[PanelKind::Effects, PanelKind::Info], 1), tabs(&[PanelKind::Markers], 0))));
     }
 
-    /// A workspace file written before FilmCraft saved craft-ui workspaces still opens, and a
+    /// A workspace file written before Joose Clip saved craft-ui workspaces still opens, and a
     /// saved workspace reads back as written.
     #[test]
     fn saved_workspaces_read_earlier_files_and_round_trip() {
