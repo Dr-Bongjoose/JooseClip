@@ -172,6 +172,8 @@ fn prop_name(pid: u16) -> &'static str {
     match pid {
         0x0001 => "MetaDictionary",
         0x0002 => "Header",
+        0x0003 => "ClassDefinitions",
+        0x0004 => "TypeDefinitions",
         0x3B03 => "Content",
         0x3B04 => "Dictionary",
         0x3B06 => "IdentificationList",
@@ -197,6 +199,16 @@ fn prop_name(pid: u16) -> &'static str {
         0x0204 => "ComponentComments",
         0x1E09 => "ParametersDefined",
         _ => "Property",
+    }
+}
+
+/// The key size of a strong reference set keyed by `key_pid`, for a set with no entry to take it
+/// from: AUIDs (definitions) are 16 bytes, MobIDs 32.
+fn set_key_size(key_pid: u16) -> usize {
+    match key_pid {
+        0x0005 | 0x1B01 => 16,
+        0x4401 | 0x2701 => 32,
+        _ => 0,
     }
 }
 
@@ -269,7 +281,7 @@ impl W {
                     index.extend_from_slice(&(items.len() as u32).to_le_bytes()); // first free key
                     index.extend_from_slice(&u32::MAX.to_le_bytes()); // last free key
                     let set_key = if let Value::StrongSet(_, k) = v { Some(*k) } else { None };
-                    let key_size = set_key.map(|k| items.first().and_then(|i| i.data(k)).map_or(0, <[u8]>::len)).unwrap_or(0);
+                    let key_size = set_key.map(|k| items.first().and_then(|i| i.data(k)).map_or_else(|| set_key_size(k), <[u8]>::len)).unwrap_or(0);
                     if let Some(k) = set_key {
                         index.extend_from_slice(&k.to_le_bytes());
                         index.push(key_size as u8);
@@ -347,10 +359,12 @@ struct R<'a> {
     cf: CompoundFile<'a>,
     paths: Vec<Vec<u16>>,
     objects: usize,
+    materialized_stream_bytes: usize,
 }
 
 const MAX_DEPTH: usize = 200;
 const MAX_OBJECTS: usize = 2_000_000;
+const MAX_MATERIALIZED_STREAM_BYTES: usize = 256 << 20;
 
 /// Parse the object tree of an AAF compound file (the root object).
 pub(crate) fn read(bytes: &[u8]) -> Result<Obj, String> {
@@ -373,7 +387,7 @@ pub(crate) fn read(bytes: &[u8]) -> Result<Obj, String> {
             }
         }
     }
-    let mut r = R { cf, paths, objects: 0 };
+    let mut r = R { cf, paths, objects: 0, materialized_stream_bytes: 0 };
     r.obj(0, 0)
 }
 
@@ -389,9 +403,15 @@ impl R<'_> {
         self.cf.child(parent, name).ok_or_else(|| bad(format!("missing storage or stream \"{name}\"")))
     }
 
-    fn stream(&self, parent: usize, name: &str) -> Result<Vec<u8>, String> {
+    fn stream(&mut self, parent: usize, name: &str) -> Result<Vec<u8>, String> {
         let id = self.child(parent, name)?;
-        self.cf.read(id).map_err(|e| e.to_string())
+        let data = self.cf.read(id).map_err(|e| e.to_string())?;
+        self.materialized_stream_bytes = self
+            .materialized_stream_bytes
+            .checked_add(data.len())
+            .filter(|&n| n <= MAX_MATERIALIZED_STREAM_BYTES)
+            .ok_or_else(|| bad("AAF materialized stream data exceeds the memory limit"))?;
+        Ok(data)
     }
 
     fn obj(&mut self, entry: usize, depth: usize) -> Result<Obj, String> {
@@ -423,6 +443,9 @@ impl R<'_> {
             let (Some(pid), Some(sf), Some(len)) = (rd_u16(&props, 4 + i * 6), rd_u16(&props, 6 + i * 6), rd_u16(&props, 8 + i * 6)) else {
                 return Err(bad("truncated property index"));
             };
+            if o.props.iter().any(|(previous, _)| *previous == pid) {
+                return Err(bad("duplicate property id"));
+            }
             let v = props.get(at..at + len as usize).ok_or_else(|| bad("truncated property value"))?;
             at += len as usize;
             let value = match sf {
@@ -468,6 +491,13 @@ impl R<'_> {
                         return Err(bad("short weak collection index"));
                     };
                     let size = size as usize;
+                    if count > 0 && size == 0 {
+                        return Err(bad("zero-size weak collection key"));
+                    }
+                    // every key must lie in the index, so its length (not the count) bounds the loop
+                    if (count as usize).checked_mul(size).and_then(|n| n.checked_add(9)).is_none_or(|end| end > idx.len()) {
+                        return Err(bad("short weak collection index"));
+                    }
                     let mut keys = Vec::new();
                     for k in 0..count as usize {
                         keys.push(idx.get(9 + k * size..9 + (k + 1) * size).ok_or_else(|| bad("short weak collection index"))?.to_vec());

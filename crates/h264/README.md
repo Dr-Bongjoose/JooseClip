@@ -85,7 +85,7 @@ engine decodes a context-coded bin without branching on its outcome.
 
 ### Draft mode
 
-`Decoder::set_draft(true)` (reduced-resolution playback only; FilmCraft enables it with Settings ▸
+`Decoder::set_draft(true)` (reduced-resolution playback only; Joose Clip enables it with Settings ▸
 Playback ▸ Draft decoding while the Program monitor plays at 1/2 or 1/4 resolution) skips the
 deblocking filter (8.7) of non-reference pictures (`nal_ref_idc` 0). No picture is predicted from
 a non-reference picture, and deblocking never changes the motion data that direct prediction
@@ -108,7 +108,7 @@ with ffmpeg + libx264; tests print a message and skip when `/opt/homebrew/bin/ff
   explicit bi-prediction. The expected output is known exactly and is also checked against ffmpeg.
 - Robustness: avcC input with pts round trip; randomly corrupted, truncated and garbage input never
   panics or deadlocks (single- and multi-threaded).
-- Conformance (`tests/conformance.rs`): every fixture is decoded single-threaded, with 3 threads
+- Conformance (`tests/it/conformance.rs`): every fixture is decoded single-threaded, with 3 threads
   and with every core, and compared byte-for-byte with `ffmpeg -f rawvideo -pix_fmt yuv420p`; on
   mismatch the first differing frame, plane, sample position and macroblock are reported. Output
   pts/POC order is checked too, and that no picture is flagged draft without draft mode. Draft
@@ -164,12 +164,12 @@ encoder is unavailable.
 | vt_high | testsrc2+noise 640x360 | VideoToolbox, High |
 | vt_high_1080p | testsrc2 1920x1080 | VideoToolbox, High 8 Mbit/s |
 
-`cargo test --release -p filmcraft-h264 --test conformance coverage_report -- --ignored --nocapture`
+`cargo test --release -p filmcraft-h264 --test it conformance::coverage_report -- --ignored --nocapture`
 prints which coding tools each fixture exercises.
 
 ## Performance
 
-`cargo test --release -p filmcraft-h264 --test perf -- --ignored --nocapture` (1080p High profile,
+`cargo test --release -p filmcraft-h264 --test it perf:: -- --ignored --nocapture` (1080p High profile,
 CABAC, B-pyramid, 120 frames, 8.8 Mbit/s; bit-exactness is verified first). Measured on an Apple M4
 Pro (14 cores) while the machine was heavily shared (load average 40-180), so these are lower bounds:
 

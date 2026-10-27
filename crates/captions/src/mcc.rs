@@ -17,7 +17,8 @@
 //! - **CDP (SMPTE ST 334-2):** identifier `96 69`, length, frame-rate code, flags, sequence
 //!   counter, a `cc_data` section (`72`, `E0 | cc_count`, cc_count × (marker/valid/type, two
 //!   bytes)), optional time code / service info sections, footer `74`, the counter again and a
-//!   checksum that makes the packet's byte sum 0 mod 256.
+//!   checksum that makes the packet's byte sum 0 mod 256. The ancillary packet then ends with one ST 291 checksum byte
+//!   (low 8 bits of DID + SDID + data count + CDP bytes).
 //! - **Writing** (29.97 fps, `30DF` or `30` timecode labels): every frame from the first caption
 //!   data to one frame after the last carries a CDP with 20 cc_data triplets: field 1 CEA-608
 //!   pop-on data (the same schedule as [SCC](crate::scc)), a null field-2 pair, CEA-708
@@ -37,7 +38,7 @@ use filmcraft_time::{FrameRate, fields_to_frames, frames_to_fields};
 use crate::cea608::with_parity;
 use crate::{Cue, Document, Error, Result, scc};
 
-/// MCC files written by FilmCraft are 29.97 fps.
+/// MCC files written by Joose Clip are 29.97 fps.
 pub const RATE: FrameRate = FrameRate::FPS_29_97;
 const CC_COUNT: usize = 20;
 /// cc_data triplets per frame left for CEA-708 (after the two CEA-608 fields).
@@ -161,6 +162,9 @@ pub fn build_cdp(seq: u16, data: &FrameData) -> Vec<u8> {
     cdp.push(((256 - sum % 256) % 256) as u8);
     let mut out = vec![0x61, 0x01, cdp.len() as u8];
     out.extend(cdp);
+    // SMPTE ST 291 ancillary checksum: low 8 bits of the sum of DID, SDID, data count and the user data words.
+    let anc_sum: u32 = out.iter().map(|&b| b as u32).sum();
+    out.push((anc_sum & 0xff) as u8);
     out
 }
 
@@ -340,6 +344,8 @@ struct Win {
     defined: bool,
     visible: bool,
     rows: Vec<String>,
+    max_rows: usize,
+    max_cols: usize,
 }
 
 struct Dec708 {
@@ -412,8 +418,9 @@ impl Dec708 {
     fn put(&mut self, c: char) {
         let w = self.w();
         match w.rows.last_mut() {
-            Some(row) => row.push(c),
-            None => w.rows.push(c.to_string()),
+            Some(row) if row.chars().count() < w.max_cols => row.push(c),
+            None if w.max_rows > 0 && w.max_cols > 0 => w.rows.push(c.to_string()),
+            _ => {}
         }
     }
     fn bitmap(&mut self, m: u8, f: impl Fn(&mut Win)) {
@@ -437,7 +444,8 @@ impl Dec708 {
                     }
                 }
                 0x0c => self.w().rows = vec![String::new()],
-                0x0d => self.w().rows.push(String::new()),
+                0x0d if self.w().rows.len() < self.w().max_rows => self.w().rows.push(String::new()),
+                0x0d => {}
                 0x0e => {
                     if let Some(r) = self.w().rows.last_mut() {
                         r.clear();
@@ -496,11 +504,24 @@ impl Dec708 {
                 0x98..=0x9f => {
                     let n = (c - 0x98) as usize;
                     let vis = arg(i) & 0x20 != 0;
+                    let max_rows = (arg(i + 3) & 0x0f) as usize + 1;
+                    let max_cols = (arg(i + 4) & 0x3f) as usize + 1;
                     let w = &mut self.win[n];
                     if !w.defined {
-                        *w = Win { defined: true, visible: vis, rows: vec![String::new()] };
+                        *w = Win { defined: true, visible: vis, rows: vec![String::new()], max_rows, max_cols };
                     } else {
                         w.visible = vis;
+                        w.max_rows = max_rows;
+                        w.max_cols = max_cols;
+                        w.rows.truncate(max_rows);
+                        for row in &mut w.rows {
+                            if let Some((at, _)) = row.char_indices().nth(max_cols) {
+                                row.truncate(at);
+                            }
+                        }
+                        if w.rows.is_empty() {
+                            w.rows.push(String::new());
+                        }
                     }
                     self.cur = n;
                     i += 6;
@@ -661,7 +682,11 @@ mod tests {
         let d = FrameData { f1: Some((0x14, 0x20)), dtvcc: vec![(true, 0x02, 0x21), (false, 0x89, 0x01)] };
         let b = build_cdp(7, &d);
         assert_eq!(&b[..3], &[0x61, 0x01, 73]);
-        let cdp = &b[3..];
+        // prefix (3) + CDP (73) + ancillary checksum byte (1)
+        assert_eq!(b.len(), 77);
+        let sum: u32 = b[..76].iter().map(|&x| x as u32).sum();
+        assert_eq!(b[76], (sum & 0xff) as u8, "ancillary checksum");
+        let cdp = &b[3..76];
         assert_eq!(cdp.len(), 73);
         assert_eq!(&cdp[..9], &[0x96, 0x69, 73, 0x4f, 0x43, 0, 7, 0x72, 0xf4]);
         assert_eq!(cdp.iter().map(|&x| x as u32).sum::<u32>() % 256, 0, "checksum");
@@ -690,5 +715,13 @@ mod tests {
         let got: Vec<(i64, i64, &str)> = back.cues.iter().map(|c| (RATE.frame_at(c.start), RATE.frame_at(c.end), c.text.as_str())).collect();
         assert_eq!(got, vec![(60, 120, "Hello, world!"), (120, 200, "Second caption\nwith two lines"), (260, 300, "Café “q” ♪")]);
         assert!(parse("garbage").is_err());
+    }
+
+    #[test]
+    fn decoder_keeps_708_text_within_declared_window_dimensions() {
+        let mut decoder = Dec708::new();
+        // Define window 0 with one row and one column, then try to overflow both.
+        decoder.service_data(&[0x98, 0, 0, 0, 0, 0, 0, b'A', b'B', 0x0d, b'C']);
+        assert_eq!(decoder.win[0].rows, ["A"]);
     }
 }

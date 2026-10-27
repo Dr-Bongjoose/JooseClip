@@ -10,10 +10,12 @@
 //! - `ui.elements {prefix?}`: registered widgets (optionally filtered by id prefix)
 //! - `ui.set {tool?, workspace?, mode?, theme?, focused?, playbackRes?, timeline?:{pps,scroll}}`
 //! - `ui.panel.show {panel}` / `ui.panel.close {panel}`
+//! - `ui.set {tts: {voice, pitch, pace, text…}}`: patch the Text to Speech panel draft
 //! - `ui.click {id | x,y, button?, count?, modifiers?}` / `ui.move {x,y}` / `ui.scroll {x,y,dx,dy}`
 //! - `ui.drag {from:{id|x,y}, to:{id|x,y}, steps?, modifiers?}`: synthetic press-move-release
 //! - `ui.key {key, command?, shift?, alt?, ctrl?}` / `ui.type {text}`
-//! - `ui.timeline.hit {x, y}`: what the timeline shows at a point (track, clip, edge, time)
+//! - `ui.timeline.hit {x, y, modifiers?}`: what the timeline shows at a point (track, clip, edge,
+//!   time) and `kind`, the trim a press of the current tool with `modifiers` starts there
 //! - `ui.timeline.locate {clip, edge?}`: screen point of a clip body/edge (for drags)
 //! - `ui.playback {action: play|stop|toggle, speed?}`
 //! - `ui.screenshot {path?, panel?}`: PNG of the window (or one panel)
@@ -23,9 +25,27 @@ use std::sync::mpsc::Sender;
 
 use serde_json::{Value, json};
 
+const MAX_CLICK_COUNT: u64 = 10;
+const MAX_DRAG_STEPS: u64 = 1_024;
+
+/// Read a pointer repetition count, using `default` when `key` is absent or null.
+///
+/// Reject non-integer, negative and above-`maximum` values; raise accepted counts to `minimum`.
+fn bounded_repetitions(params: &Value, key: &str, default: u64, minimum: u64, maximum: u64) -> Result<u64, String> {
+    // The MCP bridge serializes omitted optional counts as null.
+    let value = match params.get(key) {
+        None | Some(Value::Null) => default,
+        Some(value) => value.as_u64().ok_or_else(|| format!("`{key}` must be a non-negative integer"))?,
+    };
+    if value > maximum {
+        return Err(format!("`{key}` must not exceed {maximum}"));
+    }
+    Ok(value.max(minimum))
+}
+
 use crate::FilmcraftApp;
 use crate::dock::PanelKind;
-use crate::state::{Mode, PlaybackRes, Tool};
+use crate::state::{Mode, PlaybackRes, ThumbnailMode, Tool};
 
 /// Prefix marking errors that may resolve after another frame.
 pub const RETRY: &str = "\u{1}";
@@ -62,10 +82,23 @@ fn err(e: impl std::fmt::Display) -> Outcome {
     Outcome::Done(json!({"ok": false, "error": e.to_string()}))
 }
 
+/// Modifier flags from `{modifiers: {ctrl, command, shift, alt}}` (or the same keys at the top
+/// level), as the OS would report them pressed.
 fn modifiers(p: &Value) -> egui::Modifiers {
     let m = p.get("modifiers").unwrap_or(p);
     let b = |k: &str| m.get(k).and_then(Value::as_bool).unwrap_or(false);
-    egui::Modifiers { alt: b("alt"), ctrl: b("ctrl"), shift: b("shift"), mac_cmd: cfg!(target_os = "macos") && b("command"), command: b("command") }
+    as_pressed(egui::Modifiers { alt: b("alt"), ctrl: b("ctrl"), shift: b("shift"), mac_cmd: cfg!(target_os = "macos") && b("command"), command: b("command") })
+}
+
+/// `m` as egui-winit reports a physical press: off macOS Control is the primary modifier, so
+/// `ctrl` and `command` are one key and a press of either carries both. A synthetic `Ctrl+Z` then
+/// matches a `Cmd+Z` binding exactly as the real key does (#245).
+fn as_pressed(mut m: egui::Modifiers) -> egui::Modifiers {
+    if !cfg!(target_os = "macos") && (m.ctrl || m.command) {
+        m.ctrl = true;
+        m.command = true;
+    }
+    m
 }
 
 /// Resolve a point from `{id}` (element centre) or `{x, y}`.
@@ -116,6 +149,15 @@ pub fn handle(app: &mut FilmcraftApp, ctx: &egui::Context, req: &ControlRequest)
             ok(serde_json::to_value(app.auto.query(prefix)).unwrap_or_default())
         }
         "ui.set" => {
+            // Text to Speech panel draft (voice, pitch, pace, text…), merged into the current one
+            if let Some(patch) = p.get("tts") {
+                let mut cur = serde_json::to_value(&app.ui.tts).unwrap_or_default();
+                merge(&mut cur, patch);
+                match serde_json::from_value(cur) {
+                    Ok(d) => app.ui.tts = d,
+                    Err(e) => return err(format!("bad `tts`: {e}")),
+                }
+            }
             if let Some(t) = s("tool") {
                 match Tool::from_name(t) {
                     Some(t) => app.ui.tool = t,
@@ -172,9 +214,29 @@ pub fn handle(app: &mut FilmcraftApp, ctx: &egui::Context, req: &ControlRequest)
                 if let Some(v) = tl.get("audioTrackHeight").and_then(Value::as_f64) {
                     app.ui.timeline.audio_track_h = v as f32;
                 }
+                // Show Video Thumbnails: "off" or a mode ("head", "headAndTail", "continuous")
+                if let Some(m) = tl.get("thumbnails").and_then(Value::as_str) {
+                    if m.eq_ignore_ascii_case("off") {
+                        app.ui.timeline.show_thumbnails = false;
+                    } else {
+                        let Some(mode) = ThumbnailMode::from_name(m) else {
+                            return err(format!("unknown thumbnail mode `{m}` (off, head, headAndTail, continuous)"));
+                        };
+                        app.ui.timeline.show_thumbnails = true;
+                        app.ui.timeline.thumbnail_mode = mode;
+                    }
+                }
             }
             if let Some(q) = s("effectsSearch") {
                 app.ui.effects_search = q.to_string();
+            }
+            // Effect Controls keyframe selection (`[{clip, effect, param, mask?, time}]`), replaced;
+            // references to missing keyframes are dropped by the panel
+            if let Some(v) = p.get("keyframeSelection") {
+                match serde_json::from_value(v.clone()) {
+                    Ok(sel) => app.ui.keyframe_selection = sel,
+                    Err(e) => return err(format!("`keyframeSelection`: {e}")),
+                }
             }
             if let Some(v) = p.get("safeMargins").and_then(Value::as_bool) {
                 app.ui.program.safe_margins = v;
@@ -271,7 +333,9 @@ pub fn handle(app: &mut FilmcraftApp, ctx: &egui::Context, req: &ControlRequest)
             if req.method == "ui.panel.show" {
                 app.show_panel(panel);
             } else {
-                app.ui.dock.close(panel);
+                if let Err(error) = app.apply_dock(craft_ui::docking::Action::Close { panel }) {
+                    return err(&error);
+                }
             }
             ok(Value::Null)
         }
@@ -281,7 +345,17 @@ pub fn handle(app: &mut FilmcraftApp, ctx: &egui::Context, req: &ControlRequest)
                 Err(e) if e.starts_with(RETRY) => return Outcome::Retry(e.trim_start_matches(RETRY).to_string()),
                 Err(e) => return err(e),
             };
+            // validate before queuing anything, so a refused count leaves no modifier held
+            let count = if req.method == "ui.click" {
+                match bounded_repetitions(p, "count", 1, 0, MAX_CLICK_COUNT) {
+                    Ok(count) => count,
+                    Err(error) => return err(error),
+                }
+            } else {
+                0
+            };
             let m = modifiers(p);
+            app.synthetic.push(egui::Event::ModifiersChanged(m));
             app.synthetic.push(egui::Event::PointerMoved(pos));
             if req.method == "ui.click" {
                 let button = match s("button") {
@@ -289,12 +363,12 @@ pub fn handle(app: &mut FilmcraftApp, ctx: &egui::Context, req: &ControlRequest)
                     Some("middle") => egui::PointerButton::Middle,
                     _ => egui::PointerButton::Primary,
                 };
-                let count = p.get("count").and_then(Value::as_u64).unwrap_or(1);
                 for _ in 0..count {
                     app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: true, modifiers: m });
                     app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers: m });
                 }
             }
+            app.synthetic.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
             Outcome::AfterInput
         }
         "ui.drag" => {
@@ -304,8 +378,12 @@ pub fn handle(app: &mut FilmcraftApp, ctx: &egui::Context, req: &ControlRequest)
                 (Err(e), _) | (_, Err(e)) if e.starts_with(RETRY) => return Outcome::Retry(e.trim_start_matches(RETRY).to_string()),
                 (Err(e), _) | (_, Err(e)) => return err(e),
             };
-            let steps = p.get("steps").and_then(Value::as_u64).unwrap_or(12).max(2);
+            let steps = match bounded_repetitions(p, "steps", 12, 2, MAX_DRAG_STEPS) {
+                Ok(steps) => steps,
+                Err(error) => return err(error),
+            };
             let m = modifiers(p);
+            app.synthetic.push(egui::Event::ModifiersChanged(m));
             app.synthetic.push(egui::Event::PointerMoved(a));
             app.synthetic.push(egui::Event::PointerButton { pos: a, button: egui::PointerButton::Primary, pressed: true, modifiers: m });
             for i in 1..=steps {
@@ -313,6 +391,7 @@ pub fn handle(app: &mut FilmcraftApp, ctx: &egui::Context, req: &ControlRequest)
                 app.synthetic.push(egui::Event::PointerMoved(a + (b - a) * f));
             }
             app.synthetic.push(egui::Event::PointerButton { pos: b, button: egui::PointerButton::Primary, pressed: false, modifiers: m });
+            app.synthetic.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
             Outcome::AfterInput
         }
         "ui.scroll" => {
@@ -322,6 +401,7 @@ pub fn handle(app: &mut FilmcraftApp, ctx: &egui::Context, req: &ControlRequest)
             };
             let dx = p.get("dx").and_then(Value::as_f64).unwrap_or(0.0) as f32;
             let dy = p.get("dy").and_then(Value::as_f64).unwrap_or(0.0) as f32;
+            app.synthetic.push(egui::Event::ModifiersChanged(modifiers(p)));
             app.synthetic.push(egui::Event::PointerMoved(pos));
             app.synthetic.push(egui::Event::MouseWheel {
                 unit: egui::MouseWheelUnit::Point,
@@ -335,19 +415,22 @@ pub fn handle(app: &mut FilmcraftApp, ctx: &egui::Context, req: &ControlRequest)
                 pressed: false,
                 modifiers: Default::default(),
             });
+            app.synthetic.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
             Outcome::AfterInput
         }
         "ui.key" => {
             let Some(name) = s("key") else { return err("missing `key`") };
-            let Some((mut m, key)) = crate::menus::parse_shortcut(name) else { return err(format!("unknown key `{name}`")) };
-            let extra = modifiers(p);
-            m |= extra;
+            let Some((m, key)) = crate::menus::parse_shortcut(name) else { return err(format!("unknown key `{name}`")) };
+            let m = as_pressed(m | modifiers(p));
+            app.synthetic.push(egui::Event::ModifiersChanged(m));
             app.synthetic.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: m });
             app.synthetic.push(egui::Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers: m });
+            app.synthetic.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
             Outcome::AfterInput
         }
         "ui.type" => {
             let Some(text) = s("text") else { return err("missing `text`") };
+            app.synthetic.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
             app.synthetic.push(egui::Event::Text(text.to_string()));
             app.synthetic.push(egui::Event::Key { key: egui::Key::F35, physical_key: None, pressed: false, repeat: false, modifiers: Default::default() });
             Outcome::AfterInput
@@ -357,7 +440,7 @@ pub fn handle(app: &mut FilmcraftApp, ctx: &egui::Context, req: &ControlRequest)
                 Ok(p) => p,
                 Err(e) => return err(e),
             };
-            ok(crate::panels::timeline::hit_json(app, pos))
+            ok(crate::panels::timeline::hit_json(app, pos, modifiers(p)))
         }
         "ui.timeline.locate" => {
             let Some(c) = p.get("clip").and_then(Value::as_u64) else { return err("need `clip`") };
@@ -401,11 +484,34 @@ pub fn handle(app: &mut FilmcraftApp, ctx: &egui::Context, req: &ControlRequest)
             ok(Value::Null)
         }
         "ui.focus" => {
-            // Explicit request: activate the app and take keyboard focus.
-            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-            ok(Value::Null)
+            if p.is_null() || p.as_object().is_some_and(|object| object.is_empty()) {
+                // Existing explicit request: activate the app and take OS keyboard focus.
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                return ok(Value::Null);
+            }
+            let Some(object) = p.as_object().filter(|object| object.len() == 1 && object.contains_key("id")) else {
+                return err("ui.focus expects {} or {id: string}");
+            };
+            let Some(id) = object.get("id").and_then(Value::as_str) else { return err("ui.focus needs a string `id`") };
+            let Some(element) = app.auto.find(id) else { return err(format!("no element `{id}` (see ui.elements)")) };
+            let Some(widget_id) = element.response_id else { return err(format!("element `{id}` has no focusable widget")) };
+            let Some(response) = ctx.read_response(widget_id) else { return err(format!("widget `{id}` is not present")) };
+            if !response.enabled()
+                || !response.sense.is_focusable()
+                || !response.interact_rect.is_finite()
+                || !response.interact_rect.is_positive()
+                || !response.interact_rect.intersects(ctx.content_rect())
+            {
+                return err(format!("widget `{id}` is not enabled, visible and focusable"));
+            }
+            // A widget target never activates the native window. The next ui.inspect reports
+            // actual focus ownership separately from this request acknowledgement.
+            response.request_focus();
+            ok(json!({"focusRequested": id, "widgetId": format!("{:016x}", widget_id.value())}))
         }
         "app.quit" => {
+            // scripted quits don't wait on the save prompt; unsaved changes stay in the recovery journal
+            app.quit_confirmed = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             ok(Value::Null)
         }
@@ -448,11 +554,24 @@ impl egui::DroppedFile for BridgeFile {
 
 pub fn inspect(app: &FilmcraftApp, ctx: &egui::Context) -> Value {
     let size = ctx.content_rect().size();
+    let keyboard_focus = ctx.memory(|memory| memory.focused()).map(|id| {
+        let elements: Vec<_> = app.auto.previous.iter().filter(|element| element.response_id == Some(id)).collect();
+        json!({
+            "widgetId": format!("{:016x}", id.value()),
+            "elementIds": elements.iter().map(|element| element.id.as_str()).collect::<Vec<_>>(),
+            "label": elements.first().map(|element| element.label.as_str()),
+            "active": ctx.read_response(id).is_some_and(|response| response.has_focus()),
+        })
+    });
     json!({
         "window": [size.x, size.y],
         "pixelsPerPoint": ctx.pixels_per_point(),
         "fps": app.fps,
+        "keyboardFocus": keyboard_focus,
+        "input": {"mode": if app.control_input_only { "controlOnly" } else { "interactive" },
+            "nativeWindowFocused": app.native_window_focused, "effectiveWindowFocused": ctx.input(|input| input.focused)},
         "ui": app.ui,
+        "sourcePlayback": {"playing": app.source_playback.clock.playing, "audioClock": app.source_playback.clock.audio_clock, "playhead": app.session.state.source_playhead.0},
         "playback": {"playing": app.playback.playing, "speed": app.playback.speed, "loop": app.playback.looping, "audioClock": app.playback.audio_clock, "dropped": app.playback.meter.counts().1, "shown": app.playback.meter.counts().0, "preroll": app.playback.preroll.is_some()},
         "playhead": app.session.playhead().0,
         "activeSequence": app.session.state.active_sequence.map(|i| i.0),
@@ -567,11 +686,128 @@ pub fn encode_png(rgba: &[u8], w: u32, h: u32) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(test)]
+mod input_bounds_tests {
+    use super::*;
+
+    /// Create an empty editor session for inspecting queued synthetic input without a window.
+    fn app() -> FilmcraftApp {
+        FilmcraftApp::new(filmcraft_engine::Session::default())
+    }
+
+    /// Dispatch a control request and fail the test if hostile parameters cause a panic.
+    fn request(app: &mut FilmcraftApp, method: &str, params: Value) -> Outcome {
+        let (req, _) = ControlRequest::new(method, params);
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle(app, &egui::Context::default(), &req)))
+            .expect("hostile control parameters must not panic")
+    }
+
+    /// Require an immediate error naming `field`, with all previously queued input unchanged.
+    fn assert_rejected(app: &mut FilmcraftApp, method: &str, params: Value, field: &str) {
+        let before = app.synthetic.clone();
+        let Outcome::Done(reply) = request(app, method, params) else { panic!("invalid input must return an error immediately") };
+        assert_eq!(reply["ok"], false);
+        assert!(reply["error"].as_str().unwrap().contains(field), "{reply}");
+        assert_eq!(app.synthetic, before, "rejection must not queue partial input or change existing input");
+    }
+
+    /// Check the first rejected click count without allocating an enormous event queue.
+    #[test]
+    fn click_count_above_limit_is_rejected() {
+        // A small boundary value reproduces the missing guard without exhausting memory.
+        assert_rejected(&mut app(), "ui.click", json!({"x": 10, "y": 20, "count": 11}), "count");
+    }
+
+    /// Check that one step above the drag limit returns an error before queuing input.
+    #[test]
+    fn drag_steps_above_limit_are_rejected() {
+        assert_rejected(&mut app(), "ui.drag", json!({"from": {"x": 0, "y": 0}, "to": {"x": 10, "y": 20}, "steps": 1025}), "steps");
+    }
+
+    /// Reject extreme counts and malformed types while preserving pending and subsequent input.
+    #[test]
+    fn hostile_counts_and_steps_leave_pending_input_unchanged() {
+        let mut app = app();
+        app.synthetic.push(egui::Event::PointerGone);
+        for value in [json!(u32::MAX), json!(u64::MAX), json!(-1), json!(1.5), json!("2"), json!(true), json!([]), json!({})] {
+            assert_rejected(&mut app, "ui.click", json!({"x": 10, "y": 20, "count": value}), "count");
+            assert_rejected(&mut app, "ui.drag", json!({"from": {"x": 0, "y": 0}, "to": {"x": 10, "y": 20}, "steps": value}), "steps");
+        }
+        // A rejected request must not prevent subsequent valid input.
+        assert!(matches!(request(&mut app, "ui.click", json!({"x": 10, "y": 20})), Outcome::AfterInput));
+    }
+
+    /// Verify missing/null defaults, accepted click bounds, button pairs and modifier resets.
+    #[test]
+    fn valid_click_counts_preserve_button_pairs_and_modifiers() {
+        let mut app = app();
+        let pos = egui::pos2(10.0, 20.0);
+        let modifiers = egui::Modifiers { shift: true, ..Default::default() };
+        for (value, count) in [(None, 1), (Some(Value::Null), 1), (Some(json!(0)), 0), (Some(json!(1)), 1), (Some(json!(2)), 2), (Some(json!(10)), 10)] {
+            app.synthetic.clear();
+            let mut params = json!({"x": 10, "y": 20, "button": "right", "modifiers": {"shift": true}});
+            if let Some(v) = value {
+                params["count"] = v;
+            }
+            assert!(matches!(request(&mut app, "ui.click", params), Outcome::AfterInput));
+            let mut expected = vec![egui::Event::ModifiersChanged(modifiers), egui::Event::PointerMoved(pos)];
+            for _ in 0..count {
+                for pressed in [true, false] {
+                    expected.push(egui::Event::PointerButton { pos, button: egui::PointerButton::Secondary, pressed, modifiers });
+                }
+            }
+            expected.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+            assert_eq!(app.synthetic, expected);
+        }
+        app.synthetic.clear();
+        assert!(matches!(request(&mut app, "ui.move", json!({"x": 10, "y": 20, "count": u64::MAX})), Outcome::AfterInput));
+        assert_eq!(app.synthetic.len(), 3, "ui.move does not use count");
+    }
+
+    /// Verify missing/null defaults and accepted drag bounds retain endpoints and button release.
+    #[test]
+    fn valid_drag_steps_preserve_defaults_endpoints_and_release() {
+        let mut app = app();
+        for (value, steps) in [(None, 12), (Some(Value::Null), 12), (Some(json!(0)), 2), (Some(json!(1)), 2), (Some(json!(2)), 2), (Some(json!(1024)), 1024)] {
+            app.synthetic.clear();
+            let mut params = json!({"from": {"x": 0, "y": 0}, "to": {"x": 10, "y": 20}, "modifiers": {"shift": true}});
+            if let Some(v) = value {
+                params["steps"] = v;
+            }
+            assert!(matches!(request(&mut app, "ui.drag", params), Outcome::AfterInput));
+            assert_eq!(app.synthetic.len(), steps + 5);
+            let modifiers = egui::Modifiers { shift: true, ..Default::default() };
+            assert_eq!(app.synthetic[0], egui::Event::ModifiersChanged(modifiers));
+            assert_eq!(app.synthetic[1], egui::Event::PointerMoved(egui::pos2(0.0, 0.0)));
+            assert_eq!(
+                app.synthetic[2],
+                egui::Event::PointerButton { pos: egui::pos2(0.0, 0.0), button: egui::PointerButton::Primary, pressed: true, modifiers }
+            );
+            assert_eq!(app.synthetic[steps + 2], egui::Event::PointerMoved(egui::pos2(10.0, 20.0)));
+            assert_eq!(
+                app.synthetic[steps + 3],
+                egui::Event::PointerButton { pos: egui::pos2(10.0, 20.0), button: egui::PointerButton::Primary, pressed: false, modifiers }
+            );
+            assert_eq!(app.synthetic[steps + 4], egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        }
+    }
+}
+
+#[cfg(test)]
 mod base64_tests {
+    use serde_json::json;
+
     #[test]
     fn rfc4648_vectors() {
         for (i, o) in [("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"), ("foob", "Zm9vYg=="), ("fooba", "Zm9vYmE="), ("foobar", "Zm9vYmFy")] {
             assert_eq!(super::base64(i.as_bytes()), o);
         }
+    }
+
+    #[test]
+    fn synthetic_event_repetition_is_bounded() {
+        assert_eq!(super::bounded_repetitions(&json!({}), "count", 1, 0, super::MAX_CLICK_COUNT).unwrap(), 1);
+        assert_eq!(super::bounded_repetitions(&json!({"steps": 1}), "steps", 12, 2, super::MAX_DRAG_STEPS).unwrap(), 2);
+        assert!(super::bounded_repetitions(&json!({"count": u64::MAX}), "count", 1, 0, super::MAX_CLICK_COUNT).is_err());
+        assert!(super::bounded_repetitions(&json!({"steps": "many"}), "steps", 12, 2, super::MAX_DRAG_STEPS).is_err());
     }
 }

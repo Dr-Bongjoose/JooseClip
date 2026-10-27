@@ -1,6 +1,6 @@
 # filmcraft-interchange
 
-Timeline interchange for FilmCraft: CMX 3600 EDL, Final Cut Pro 7 XML (xmeml), FCPXML,
+Timeline interchange for Joose Clip: CMX 3600 EDL, Final Cut Pro 7 XML (xmeml), FCPXML,
 OpenTimelineIO, AAF and OMF import and export, plus Avid ALE. Layer L2: no file I/O; media
 references are strings and audio essence is supplied by the caller (the engine).
 
@@ -24,12 +24,16 @@ read off files it exports, never from the application itself.
 
 The other formats' editions are listed in the module docs (`edl`, `fcp7`, `fcpxml`, `otio`, `ale`).
 
+**Invariant — Unicode media URLs:** file URL prefix probes must not panic when their byte boundary
+falls inside a UTF-8 character. Timeline importers use the shared converter; `tests/it/file_urls.rs`
+checks expected Unicode paths through the public converter, resolver and EDL importer.
+
 ## AAF and OMF
 
 `comp` holds a format-neutral mob-style model (compositions of slots whose sequences of fillers,
 source clips and overlapping transitions reference media through master and file source mobs).
-`aaf` and `omf` serialise it; both import back into the same model and from there into FilmCraft
-sequences and media. Mapping details (what each FilmCraft feature becomes) are in the `aaf` and
+`aaf` and `omf` serialise it; both import back into the same model and from there into Joose Clip
+sequences and media. Mapping details (what each Joose Clip feature becomes) are in the `aaf` and
 `omf` module docs. Times are kept in ticks in the model; compositions use the sequence frame rate
 for picture and the sample rate for sound slots, so audio edits are sample-exact.
 
@@ -47,7 +51,7 @@ For the formats Premiere Pro exports (FCP7 XML, OTIO, EDL, AAF, OMF) a nested se
 the way Premiere Pro 26.5.2 writes it, as seen in the files it exports for a sequence with a nest.
 Premiere Pro does not write FCPXML.
 
-| Format | Written as | On import into FilmCraft |
+| Format | Written as | On import into Joose Clip |
 |---|---|---|
 | FCP7 XML | a clip item holding the nested `<sequence>` (by id after the first use) | a sequence the clips use |
 | FCPXML | a `ref-clip` to a `media` resource holding the sequence | a sequence the clips use |
@@ -65,13 +69,13 @@ compositions too (the top-level ones are those no other composition uses).
 
 ## Graphics and adjustment layers
 
-No format here has an equivalent of a FilmCraft graphic (title) clip or an adjustment layer, and
+No format here has an equivalent of a Joose Clip graphic (title) clip or an adjustment layer, and
 none of the exports brings one back. Each such clip is named in the export `Report` as a warning
 (`graphic clip "Title" at frame 48 …`, one line per clip), with what was written instead:
 
-| Format | Written as | On import into FilmCraft |
+| Format | Written as | On import into Joose Clip |
 |---|---|---|
-| FCP7 XML | a clip item without media (its layers as FilmCraft filter ids) | not read back; the import report names the skipped clip item |
+| FCP7 XML | a clip item without media (its layers as Joose Clip filter ids) | not read back; the import report names the skipped clip item |
 | FCPXML | a clip without media | not read back |
 | OTIO | a clip with a `MissingReference` (effects in the `filmcraft` metadata) | offline media |
 | EDL | an ordinary event with the reel the reel mode gives | an ordinary clip |
@@ -81,7 +85,7 @@ OMF carries no video at all.
 
 ## Tests
 
-- `tests/aaf_omf.rs`: AAF round trips at 25, 29.97 DF, 23.976 and 59.94 DF (clips, gaps,
+- `tests/it/aaf_omf.rs`: AAF round trips at 25, 29.97 DF, 23.976 and 59.94 DF (clips, gaps,
   two-sided and one-sided transitions, links, markers, start timecodes, constant and keyframed
   gain, media markers and timecode); 512-byte sectors; breakout to mono; embedded trimmed audio
   (sample data and source offsets); separate consolidated files with a video mixdown; OMF round
@@ -89,7 +93,7 @@ OMF carries no video at all.
   random corruption never panic. Nested sequences: AAF round trips as compositions (nests in
   nests, a nest used twice, another frame and sample rate, breakout to mono), OMF with the
   rendered sound, the audio needs of nests, a sequence inside itself.
-- `tests/uncarried_clips.rs`: every format's export report names each graphic clip and adjustment
+- `tests/it/uncarried_clips.rs`: every format's export report names each graphic clip and adjustment
   layer once, as a warning; a sequence without them reports nothing; what a re-import gives back
   matches the report; the FCP7 XML import names a clip item whose file is not defined.
 - `src/aaf/tests.rs`: written files checked against the required properties of every class

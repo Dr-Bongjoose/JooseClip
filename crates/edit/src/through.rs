@@ -22,6 +22,18 @@ pub fn is_through_edit(a: &TrackItem, b: &TrackItem) -> bool {
     if a.end() != b.start || a.item != b.item || a.speed != b.speed || a.reverse != b.reverse || a.multicam != b.multicam {
         return false;
     }
+    if a.enabled != b.enabled
+        || a.gain_db != b.gain_db
+        || a.effects != b.effects
+        || a.scale_to_frame != b.scale_to_frame
+        || a.hold_filters != b.hold_filters
+        || a.time_interpolation != b.time_interpolation
+        || a.field_options != b.field_options
+        || a.audio_stream != b.audio_stream
+        || a.source_channels != b.source_channels
+    {
+        return false;
+    }
     match (a.frame_hold, b.frame_hold) {
         (None, None) => {}
         (Some(x), Some(y)) => return x == y,
@@ -59,6 +71,11 @@ pub fn through_edits(seq: &Sequence) -> Vec<ThroughEdit> {
 /// piece is listed. The left piece absorbs the right one (keeping its own effects and attributes);
 /// a transition sitting on the cut is removed. Returns the number of edits joined.
 pub fn join_through_edits(seq: &mut Sequence, only: &[ClipId]) -> usize {
+    join_through_edits_where(seq, |a, b| only.is_empty() || only.contains(&a) || only.contains(&b))
+}
+
+/// Join the through edits on unlocked tracks whose (left, right) pieces `wanted` accepts.
+pub fn join_through_edits_where(seq: &mut Sequence, wanted: impl Fn(ClipId, ClipId) -> bool) -> usize {
     let mut n = 0;
     for tr in seq.all_tracks_mut() {
         if tr.locked {
@@ -67,8 +84,7 @@ pub fn join_through_edits(seq: &mut Sequence, only: &[ClipId]) -> usize {
         let mut i = 0;
         while i + 1 < tr.items.len() {
             let (a, b) = (&tr.items[i], &tr.items[i + 1]);
-            let wanted = only.is_empty() || only.contains(&a.id) || only.contains(&b.id);
-            if !(wanted && is_through_edit(a, b)) {
+            if !(wanted(a.id, b.id) && is_through_edit(a, b)) {
                 i += 1;
                 continue;
             }
@@ -180,6 +196,7 @@ mod tests {
             hold_filters: false,
             field_options: None,
             source_channels: Vec::new(),
+            audio_stream: 0,
             graphic: None,
         }
     }
@@ -207,6 +224,20 @@ mod tests {
         assert_eq!(te[0].time, Tick(40));
         assert_eq!(join_through_edits(&mut q, &[]), 1);
         assert_eq!(q.video_tracks[0].items, orig.video_tracks[0].items);
+    }
+
+    #[test]
+    fn pieces_with_different_settings_are_not_through_edits() {
+        let tweaks: [fn(&mut TrackItem); 3] = [|t| t.enabled = false, |t| t.gain_db = -20.0, |t| t.scale_to_frame = true];
+        for tweak in tweaks {
+            let mut q = seq_with(vec![item(10, 0, 100, 500)]);
+            let mut n = 1000;
+            razor(&mut q, &[], Tick(40), &mut ctx(&mut n));
+            tweak(&mut q.video_tracks[0].items[1]);
+            assert!(through_edits(&q).is_empty());
+            assert_eq!(join_through_edits(&mut q, &[]), 0);
+            assert_eq!(q.video_tracks[0].items.len(), 2);
+        }
     }
 
     #[test]

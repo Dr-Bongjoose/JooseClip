@@ -2,7 +2,7 @@
 //!
 //! **Channel order.** 5.1 audio is always in the SMPTE / WAVE order **L, R, C, LFE, Ls, Rs**
 //! ([`L`], [`R`], [`C`], [`LFE`], [`LS`], [`RS`]); stereo is L, R; mono is one channel. Codecs with a
-//! different native order (AAC: C, L, R, Ls, Rs, LFE) reorder at the encoder boundary.
+//! different native order (AAC: C, L, R, Ls, Rs, LFE) reorder at the codec boundary.
 //!
 //! **Downmix** follows ITU-R BS.775 (Table 2, "3/2 source" rows), with `k = 1/√2` (−3 dB):
 //!
@@ -17,7 +17,7 @@
 //! both sides.
 //!
 //! **Upmix** places the source on the front speakers without inventing content: mono → C (5.1) or
-//! both sides at unity (2.0, as mono clips are played everywhere else in FilmCraft); stereo → L, R.
+//! both sides at unity (2.0, as mono clips are played everywhere else in Joose Clip); stereo → L, R.
 //!
 //! **5.1 panner** ([`Pan51`]): a puck at `(x, y)` in the listening square (x −1 left … +1 right,
 //! y −1 rear … +1 front). A point source at `(x, y)` is split front/rear and left/right with the

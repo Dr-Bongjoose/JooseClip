@@ -1,7 +1,7 @@
 //! Lumetri Presets (Effects panel ▸ Lumetri Presets): built-in Lumetri Color looks, and their
 //! thumbnails rendered by our own Lumetri on a generated preview picture.
 //!
-//! The presets are original work: parameter values chosen by FilmCraft contributors, named
+//! The presets are original work: parameter values chosen by Joose Clip contributors, named
 //! descriptively (no third-party look names, LUTs or preview images). The preview picture
 //! ([`preview_image`]) is procedural: a dusk sky with a sun, mountain ridges, a lake with its
 //! reflection, a grey ramp down the left edge and six colour chips along the bottom, so a
@@ -228,6 +228,7 @@ pub fn thumbnail(preset: &LumetriPreset, w: usize, h: usize) -> Image {
         clip_name: "",
         project: None,
         env: None,
+        frame_rate: 24.0,
         working: filmcraft_color::WorkingSpace::Rec709,
     };
     apply(&mut img, &preset.instance(), &cx);

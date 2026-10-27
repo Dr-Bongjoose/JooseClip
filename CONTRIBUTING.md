@@ -1,4 +1,4 @@
-# Contributing to FilmCraft
+# Contributing to Joose Clip
 
 Thanks for helping. Before you start:
 

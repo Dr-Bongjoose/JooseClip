@@ -6,17 +6,21 @@
 //! jobs of later pictures block per row on the reference data they need, so several pictures decode
 //! concurrently (frame-level parallelism).
 
-use crate::dpb::{Dpb, Output, OutputMeta};
+use crate::dpb::{Dpb, Output, OutputMeta, RefMark};
 use crate::error::{Error, Result, ensure, invalid, unsupported};
 use crate::params::{Pps, Sps};
 use crate::picture::{Frame, FrameRef, MbKind, MbState, Planes, RefPic};
-use crate::slice::{NalHeader, Poc, PocState, SliceHeader, SliceType, nal_type};
+use crate::slice::{NalHeader, Poc, PocState, SliceHeader, SliceType, is_new_picture, nal_type};
 use crate::slicedec::{PicState, SliceDecoder};
 use crate::transform::LevelScale;
 use crate::{ColorInfo, Picture};
 use filmcraft_bitstream::{BitReader, annexb_nals, length_prefixed_nals, unescape_rbsp};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+
+/// The decoder supports at most 16 reference pictures, so constructing more
+/// inferred gap pictures cannot improve a usable reference list.
+const MAX_INFERRED_GAP_FRAMES: u32 = 16;
 
 /// One slice of a picture job.
 struct SliceJob {
@@ -81,7 +85,7 @@ pub struct Decoder {
     spss: Vec<Option<Arc<Sps>>>,
     ppss: Vec<Option<Arc<Pps>>>,
     nal_length_size: Option<usize>,
-    dpb: Dpb,
+    dpb: Dpb<FrameRef>,
     poc_state: PocState,
     prev_ref_frame_num: u32,
     pending: Option<PendingPic>,
@@ -89,7 +93,7 @@ pub struct Decoder {
     active_sps: Option<Arc<Sps>>,
     ls_cache: Vec<(Arc<Pps>, Arc<LevelScale>)>,
     /// Pictures leaving the DPB, converted once their decoding job has finished.
-    out_queue: VecDeque<Output>,
+    out_queue: VecDeque<Output<FrameRef>>,
     shared: Arc<Shared>,
     #[cfg(feature = "threads")]
     pool: Option<rayon::ThreadPool>,
@@ -104,27 +108,6 @@ impl Default for Decoder {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Is `sh` the first slice of a new primary coded picture relative to `prev` (7.4.1.2.4)?
-fn is_new_picture(prev: &SliceHeader, sh: &SliceHeader, sps: &Sps) -> bool {
-    if sh.frame_num != prev.frame_num
-        || sh.pps_id != prev.pps_id
-        || sh.field_pic != prev.field_pic
-        || sh.bottom_field != prev.bottom_field
-        || (sh.nal_ref_idc == 0) != (prev.nal_ref_idc == 0)
-        || sh.idr != prev.idr
-        || (sh.idr && prev.idr && sh.idr_pic_id != prev.idr_pic_id)
-    {
-        return true;
-    }
-    if sps.pic_order_cnt_type == 0 && (sh.pic_order_cnt_lsb != prev.pic_order_cnt_lsb || sh.delta_pic_order_cnt_bottom != prev.delta_pic_order_cnt_bottom) {
-        return true;
-    }
-    if sps.pic_order_cnt_type == 1 && sh.delta_pic_order_cnt != prev.delta_pic_order_cnt {
-        return true;
-    }
-    false
 }
 
 /// The worker threads [`Decoder::new`] uses: the available cores (at most 16) with the `threads`
@@ -255,7 +238,7 @@ impl Decoder {
             }
         }
         // The access unit is complete: hand its picture to a decoding job.
-        self.submit_pending();
+        self.submit_pending()?;
         if let Some(e) = self.take_error() {
             result = result.and(Err(e));
         }
@@ -275,7 +258,7 @@ impl Decoder {
 
     /// Output all remaining pictures (end of stream).
     pub fn flush(&mut self) -> Vec<Picture> {
-        self.submit_pending();
+        let _ = self.submit_pending();
         let mut outs = Vec::new();
         self.dpb.flush(&mut outs);
         self.emit(outs);
@@ -325,7 +308,7 @@ impl Decoder {
             nal_type::SLICE_DPA | nal_type::SLICE_DPB | nal_type::SLICE_DPC => {
                 return unsupported("data partitioning (Extended profile)");
             }
-            nal_type::END_SEQ | nal_type::END_STREAM => self.submit_pending(),
+            nal_type::END_SEQ | nal_type::END_STREAM => self.submit_pending()?,
             // SEI, AUD, filler, SPS extension, prefix NAL, subset SPS, auxiliary and extension slices: skipped.
             _ => {}
         }
@@ -374,7 +357,7 @@ impl Decoder {
             Some(p) => is_new_picture(&p.first, &sh, &sps) || sh.first_mb_in_slice == 0 || !Arc::ptr_eq(&p.sps, &sps),
         };
         if new_pic {
-            self.submit_pending();
+            self.submit_pending()?;
             if sh.first_mb_in_slice != 0 && self.active_sps.is_none() {
                 return invalid("stream does not start with the first slice of a picture");
             }
@@ -384,7 +367,9 @@ impl Decoder {
         let Some(pending) = self.pending.as_mut() else {
             return invalid("slice without a started picture");
         };
-        let refs = self.dpb.build_ref_lists(&sh, pending.poc.frame(), sps.max_frame_num())?;
+        let refs = self
+            .dpb
+            .build_ref_lists(&sh, pending.poc.frame(), sps.max_frame_num(), |e| RefPic { frame: e.frame.clone(), long_term: e.mark == RefMark::Long })?;
         if !sh.slice_type.is_intra() {
             ensure!(!refs[0].is_empty(), "no reference pictures available for inter slice");
             if sh.slice_type.is_b() {
@@ -444,6 +429,10 @@ impl Decoder {
         } else {
             let max = sps.max_frame_num();
             if sh.frame_num != self.prev_ref_frame_num && sh.frame_num != (self.prev_ref_frame_num + 1) % max {
+                let gap = (sh.frame_num + max - self.prev_ref_frame_num - 1) % max;
+                if gap > MAX_INFERRED_GAP_FRAMES {
+                    return Err(Error::Invalid("frame number gap exceeds the supported reference limit".into()));
+                }
                 // frame_num gap (8.2.5.2): insert "non-existing" frames. Their samples are never used by
                 // conforming streams; copy the latest decoded frame for concealment.
                 let meta = Arc::new(output_meta(sps, pts, false));
@@ -464,7 +453,7 @@ impl Decoder {
                         }
                         _ => Planes::gray(mb_w * 16, mb_h * 16),
                     };
-                    (Arc::new(Frame::from_planes(id, 0, &planes)), meta.clone())
+                    (Arc::new(Frame::from_planes(id, 0, &planes)), 0, meta.clone())
                 };
                 let mut upd = |fnum: u32| poc_state.update_gap_frame(fnum, sps);
                 self.shared.stats.lock().map(|mut s| s.frame_num_gaps += 1).ok();
@@ -483,8 +472,8 @@ impl Decoder {
     }
 
     /// Start decoding the pending picture and do its reference marking / DPB insertion.
-    fn submit_pending(&mut self) {
-        let Some(p) = self.pending.take() else { return };
+    fn submit_pending(&mut self) -> Result<()> {
+        let Some(p) = self.pending.take() else { return Ok(()) };
         let PendingPic { frame, sps, first, poc, pts, key, slices } = p;
         let draft = self.draft && first.nal_ref_idc == 0;
         self.dispatch(frame.clone(), slices, draft);
@@ -495,8 +484,9 @@ impl Decoder {
         let meta = Arc::new(OutputMeta { draft, ..output_meta(&sps, pts, key) });
         let mut outs = Vec::new();
         let fpoc = frame.poc;
-        self.dpb.store_picture(&first, frame, fpoc, sps.max_frame_num(), sps.max_num_ref_frames as usize, meta, &mut outs);
+        self.dpb.store_picture(&first, frame, fpoc, sps.max_frame_num(), sps.max_num_ref_frames as usize, meta, &mut outs)?;
         self.emit(outs);
+        Ok(())
     }
 
     fn dispatch(&mut self, frame: FrameRef, slices: Vec<SliceJob>, draft: bool) {
@@ -516,7 +506,7 @@ impl Decoder {
         run_job(frame, slices, &shared, draft);
     }
 
-    fn emit(&mut self, outs: Vec<Output>) {
+    fn emit(&mut self, outs: Vec<Output<FrameRef>>) {
         self.out_queue.extend(outs);
     }
 }
@@ -613,7 +603,7 @@ fn output_meta(sps: &Sps, pts: i64, key: bool) -> OutputMeta {
     }
 }
 
-fn make_picture(o: &Output) -> Picture {
+fn make_picture(o: &Output<FrameRef>) -> Picture {
     let (cx, cy, cw, ch) = o.meta.crop;
     let (cx, cy, cw, ch) = (cx as usize, cy as usize, cw as usize, ch as usize);
     let (y, u, v) = o.frame.copy_cropped((cx, cy, cw, ch));

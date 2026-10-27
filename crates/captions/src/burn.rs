@@ -12,6 +12,12 @@ use filmcraft_time::Tick;
 
 use filmcraft_text::{ParagraphStyle, TextStyle, layout, render};
 
+/// Caption overlays are transient render resources, not source images. Keep one cue from
+/// materialising an unbounded mask or RGBA buffer.
+const MAX_OVERLAY_PIXELS: usize = 16 << 20;
+const MAX_CAPTION_SIZE_1080: f32 = 256.0;
+const MAX_OUTLINE_RADIUS: f32 = 64.0;
+
 /// A rendered caption: premultiplied linear-light RGBA f32 pixels at `(x, y)` in the frame.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Overlay {
@@ -49,13 +55,10 @@ impl Overlay {
     }
 }
 
-/// The caption face: Inter SemiBold at `px`.
-fn caption_style(px: f32) -> TextStyle {
-    TextStyle { style: "SemiBold".into(), size: px, ..Default::default() }
-}
-
-fn measure(text: &str, px: f32) -> f32 {
-    filmcraft_text::measure(text, &caption_style(px))
+/// The caption face: the track's font family (Inter when empty or not installed) in SemiBold at `px`.
+fn caption_style(font: &str, px: f32) -> TextStyle {
+    let family = if font.trim().is_empty() { filmcraft_text::fonts::DEFAULT_FAMILY } else { font.trim() };
+    TextStyle { family: family.into(), style: "SemiBold".into(), size: px, ..Default::default() }
 }
 
 fn lin(c: [u8; 4]) -> [f32; 4] {
@@ -64,12 +67,12 @@ fn lin(c: [u8; 4]) -> [f32; 4] {
 }
 
 /// Word-wrap one line to `max_w` pixels.
-fn wrap(line: &str, px: f32, max_w: f32) -> Vec<String> {
+fn wrap(line: &str, ts: &TextStyle, max_w: f32) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
     for word in line.split(' ') {
         let cand = if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
-        if !cur.is_empty() && measure(&cand, px) > max_w {
+        if !cur.is_empty() && filmcraft_text::measure(&cand, ts) > max_w {
             out.push(std::mem::take(&mut cur));
             cur = word.to_string();
         } else {
@@ -113,20 +116,21 @@ pub fn render_caption(c: &Caption, style: &CaptionStyle, w: usize, h: usize) -> 
         return None;
     }
     let scale = h as f32 / 1080.0;
-    let px = (style.size * scale).max(4.0);
+    let px = (style.size.clamp(4.0, MAX_CAPTION_SIZE_1080) * scale).clamp(4.0, h as f32);
     let max_w = w as f32 * 0.9;
+    let ts = caption_style(&style.font, px);
     let mut lines: Vec<String> = Vec::new();
     // (speaker names are metadata; like Premiere, they are not burned in)
     for l in c.plain_lines() {
-        lines.extend(wrap(l.trim(), px, max_w));
+        lines.extend(wrap(l.trim(), &ts, max_w));
     }
     lines.retain(|l| !l.is_empty());
     if lines.is_empty() {
         return None;
     }
-    let vm = filmcraft_text::fonts::face(filmcraft_text::resolve("Inter", "SemiBold").face).metrics(px);
+    let vm = filmcraft_text::fonts::face(filmcraft_text::resolve(&ts.family, &ts.style).face).metrics(px);
     let (asc, desc) = (vm.ascent, vm.descent);
-    let lh = px * style.line_spacing.max(0.8);
+    let lh = px * style.line_spacing.clamp(0.8, 4.0);
     let pad_x = (px * 0.3).round();
     let block_h = lh * lines.len() as f32;
     let (line_override, align_override) = vtt_overrides(&c.settings);
@@ -141,7 +145,7 @@ pub fn render_caption(c: &Caption, style: &CaptionStyle, w: usize, h: usize) -> 
     .max(0.0)
     .round();
     let side = w as f32 * 0.05;
-    let widths: Vec<f32> = lines.iter().map(|l| measure(l, px)).collect();
+    let widths: Vec<f32> = lines.iter().map(|l| filmcraft_text::measure(l, &ts)).collect();
     let xs: Vec<f32> = widths
         .iter()
         .map(|&lw| match align {
@@ -150,15 +154,24 @@ pub fn render_caption(c: &Caption, style: &CaptionStyle, w: usize, h: usize) -> 
             CaptionAlign::Center => (w as f32 - lw) / 2.0,
         })
         .collect();
-    let outline = (style.outline * scale).max(0.0);
+    let outline = (style.outline * scale).clamp(0.0, MAX_OUTLINE_RADIUS);
     let grow = outline.ceil() + 1.0;
     let bx0 = xs.iter().zip(&widths).map(|(x, _)| x - pad_x - grow).fold(f32::MAX, f32::min).floor();
     let bx1 = xs.iter().zip(&widths).map(|(x, lw)| x + lw + pad_x + grow).fold(f32::MIN, f32::max).ceil();
     let by0 = (top - grow).floor();
     let by1 = (top + block_h + grow).ceil();
-    let (ox, oy) = (bx0 as i32, by0 as i32);
-    let ow = (bx1 - bx0).max(1.0) as usize;
-    let oh = (by1 - by0).max(1.0) as usize;
+    // Text can be wider than the frame (an unbroken imported WebVTT word, for example). Raster
+    // only the visible intersection; `draw` receives the original coordinates and clips into it.
+    let (left, top) = (bx0.clamp(0.0, w as f32), by0.clamp(0.0, h as f32));
+    let (right, bottom) = (bx1.clamp(0.0, w as f32), by1.clamp(0.0, h as f32));
+    if right <= left || bottom <= top {
+        return None;
+    }
+    let (ox, oy) = (left as i32, top as i32);
+    let (ow, oh) = ((right - left) as usize, (bottom - top) as usize);
+    if ow.checked_mul(oh).is_none_or(|pixels| pixels > MAX_OVERLAY_PIXELS) {
+        return None;
+    }
     let mut cover = vec![0.0f32; ow * oh];
     let mut bg = vec![0.0f32; ow * oh];
     for (i, line) in lines.iter().enumerate() {
@@ -176,7 +189,7 @@ pub fn render_caption(c: &Caption, style: &CaptionStyle, w: usize, h: usize) -> 
             }
         }
         let baseline = lt + (lh - (asc + desc)) / 2.0 + asc;
-        let l = layout(line, &caption_style(px), &ParagraphStyle::default());
+        let l = layout(line, &ts, &ParagraphStyle::default());
         let mut m = filmcraft_text::Mask { w: ow, h: oh, a: std::mem::take(&mut cover) };
         render::draw(&l, &render::at(xs[i], baseline.round()), &mut m, (ox, oy));
         cover = m.a;
@@ -289,6 +302,29 @@ mod tests {
     }
 
     #[test]
+    fn margin_is_a_fraction_of_frame_height() {
+        // #1542: on a portrait sequence, a bottom-anchored caption with margin 0.31 sits with
+        // its bottom edge 0.31 of the frame height above the bottom; the top anchor mirrors it.
+        let st = CaptionStyle { anchor: CaptionAnchor::Bottom, margin: 0.31, size: 78.0, ..Default::default() };
+        let o = render_caption(&cap("Hello world"), &st, 1080, 1920).unwrap();
+        // the overlay pads the content by the outline grow (the default outline is 0, so by 1 px)
+        let bottom = (o.y as usize + o.h) as f32;
+        let expected = 1920.0 - 0.31 * 1920.0;
+        assert!((bottom - expected).abs() <= 2.0, "bottom edge {bottom}, expected {expected}");
+        let st = CaptionStyle { anchor: CaptionAnchor::Top, margin: 0.31, size: 78.0, ..Default::default() };
+        let o = render_caption(&cap("Hello world"), &st, 1080, 1920).unwrap();
+        assert!((o.y as f32 - 0.31 * 1920.0).abs() <= 2.0, "top edge {}, expected {}", o.y, 0.31 * 1920.0);
+        // margin 0 and the 0.45 clamp stay inside the frame
+        for margin in [0.0, 0.31, 0.45, 9.0] {
+            let st = CaptionStyle { anchor: CaptionAnchor::Bottom, margin, size: 78.0, ..Default::default() };
+            let o = render_caption(&cap("Hello world"), &st, 1080, 1920).unwrap();
+            // the outline-grow padding plus ceil rounding may reach 2 px past the edge; the
+            // composite clips it
+            assert!(o.y >= 0 && o.y as usize + o.h <= 1922, "margin {margin}: y {} h {}", o.y, o.h);
+        }
+    }
+
+    #[test]
     fn wraps_and_composites() {
         let long = "word ".repeat(60);
         let o = render_caption(&cap(&long), &CaptionStyle::default(), 640, 360).unwrap();
@@ -299,10 +335,46 @@ mod tests {
     }
 
     #[test]
+    fn overlay_is_clipped_to_the_frame_for_an_unbroken_word() {
+        let o = render_caption(&cap(&"W".repeat(10_000)), &CaptionStyle::default(), 640, 360).unwrap();
+        assert!(o.x >= 0 && o.y >= 0);
+        assert!(o.w <= 640 && o.h <= 360, "{}x{}", o.w, o.h);
+        assert!(o.w.checked_mul(o.h).unwrap() <= MAX_OVERLAY_PIXELS);
+    }
+
+    #[test]
+    fn hostile_outline_is_bounded() {
+        let st = CaptionStyle { outline: 1_000_000.0, ..Default::default() };
+        let o = render_caption(&cap("Safe"), &st, 640, 360).unwrap();
+        assert!(o.w <= 640 && o.h <= 360, "{}x{}", o.w, o.h);
+    }
+
+    #[test]
     fn outline_draws_around_text() {
         let st = CaptionStyle { background: false, outline: 4.0, outline_color: [255, 0, 0, 255], ..Default::default() };
         let o = render_caption(&cap("O"), &st, 1920, 1080).unwrap();
         assert!(o.px.chunks(4).any(|p| p[0] > 0.9 && p[1] < 0.05 && p[3] > 0.9), "red outline pixels");
+    }
+
+    #[test]
+    fn track_font_is_used() {
+        // the style's font used to be ignored (always Inter)
+        let inter = render_caption(&cap("Hello world"), &CaptionStyle::default(), 1920, 1080).unwrap();
+        let serif = CaptionStyle { font: "Noto Serif".into(), ..Default::default() };
+        let serif = render_caption(&cap("Hello world"), &serif, 1920, 1080).unwrap();
+        assert_ne!((inter.w, &inter.px), (serif.w, &serif.px), "Noto Serif renders like Inter");
+        let mono = CaptionStyle { font: "jetbrains mono".into(), ..Default::default() };
+        let mono = render_caption(&cap("Hello world"), &mono, 1920, 1080).unwrap();
+        assert_ne!((inter.w, &inter.px), (mono.w, &mono.px), "JetBrains Mono renders like Inter");
+    }
+
+    #[test]
+    fn unknown_or_empty_font_falls_back_to_inter() {
+        let inter = render_caption(&cap("Hello"), &CaptionStyle::default(), 1280, 720).unwrap();
+        for font in ["", "  ", "No Such Font 123"] {
+            let st = CaptionStyle { font: font.into(), ..Default::default() };
+            assert_eq!(render_caption(&cap("Hello"), &st, 1280, 720), Some(inter.clone()), "font {font:?}");
+        }
     }
 
     #[test]

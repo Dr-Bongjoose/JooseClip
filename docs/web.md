@@ -1,4 +1,4 @@
-# FilmCraft on the web
+# Joose Clip on the web
 
 `apps/filmcraft-web` runs the same engine and egui UI as the desktop app in the browser: the
 workspace compiled to `wasm32-unknown-unknown`, started by eframe's web runner on WebGPU (WebGL2
@@ -31,9 +31,9 @@ unaffected; `cargo xtask wasm` (part of `cargo xtask ci`) checks it, with `filmc
 URL flags: `?empty` (no demo project), `?norecover` (don't reopen the auto-saved project),
 `?fresh` (also don't restore media kept in OPFS), `?cpu` (CPU compositor), `?webgl` (WebGL2 only;
 the page reloads with it when WebGPU is present but fails to start), `?nowebcodecs` (decode with
-FilmCraft's own decoders only).
+Joose Clip's own decoders only).
 
-If the app panics after start-up (or runs out of memory), `index.html` shows a "FilmCraft stopped
+If the app panics after start-up (or runs out of memory), `index.html` shows a "Joose Clip stopped
 working" overlay with the panic message and a Reload button instead of a frozen canvas, and sets
 `window.filmcraftLoad.fatal`. Code the web build runs must not call `std::env::temp_dir`,
 `std::time::{Instant, SystemTime}::now`, `std::thread::sleep`/`spawn` or `std::process::id`: they
@@ -79,7 +79,7 @@ copy exists (files up to 4 GiB are copied in the background).
 
 ### Decoding
 
-FilmCraft's own decoders (H.264, HEVC, VP9, AV1, ProRes, DNxHR, MJPEG, AAC, Opus…) run in the
+Joose Clip's own decoders (H.264, HEVC, VP9, AV1, ProRes, DNxHR, MJPEG, AAC, Opus…) run in the
 browser unchanged. When the browser has WebCodecs, H.264, HEVC, VP9 and AV1 video in MP4/MOV is
 decoded by the browser's (usually hardware) `VideoDecoder` instead: `webcodecs::reader_opener` is
 registered ahead of the built-in openers and opens such files as a `WcSource`, whose audio and
@@ -100,7 +100,7 @@ until the first click or key press; until then playback runs on the wall clock.
 
 ### GPU
 
-eframe creates a WebGPU device when the browser has one, else WebGL2. FilmCraft's GPU compositor
+eframe creates a WebGPU device when the browser has one, else WebGL2. Joose Clip's GPU compositor
 (`filmcraft-gpu`) is used on WebGPU; on WebGL2 frames are composited on the CPU. Check
 `filmcraft.info().backend` and `.compositor`.
 

@@ -1,4 +1,4 @@
-//! Class ids, property ids and definition ids of the AAF object model subset FilmCraft reads and
+//! Class ids, property ids and definition ids of the AAF object model subset Joose Clip reads and
 //! writes (AAF Object Specification v1.1, AAF Edit Protocol). Class and data definition AUIDs are
 //! SMPTE labels (RP 224 / RP 210 registers) in AUID byte order; property ids are the AAF / ST 377-1
 //! local tags.
@@ -68,7 +68,7 @@ pub(crate) mod cls {
     pub const DESCRIPTIVE_MARKER: Auid = class(0x41);
     pub const PCM_DESCRIPTOR: Auid = class(0x48);
     pub const IMPORT_DESCRIPTOR: Auid = class(0x4A);
-    /// Classes with a `Locator` and media properties FilmCraft reads as file descriptors.
+    /// Classes with a `Locator` and media properties Joose Clip reads as file descriptors.
     pub const WAVE_DESCRIPTOR: Auid = class(0x2C);
     pub const AIFC_DESCRIPTOR: Auid = class(0x26);
     pub const SOUND_DESCRIPTOR: Auid = class(0x42);
@@ -82,6 +82,10 @@ pub(crate) mod pid {
     // Root
     pub const ROOT_META_DICTIONARY: u16 = 0x0001;
     pub const ROOT_HEADER: u16 = 0x0002;
+    // MetaDictionary and MetaDefinition
+    pub const META_CLASS_DEFINITIONS: u16 = 0x0003;
+    pub const META_TYPE_DEFINITIONS: u16 = 0x0004;
+    pub const META_IDENTIFICATION: u16 = 0x0005;
     // Header
     pub const BYTE_ORDER: u16 = 0x3B01;
     pub const LAST_MODIFIED: u16 = 0x3B02;

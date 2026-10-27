@@ -108,7 +108,7 @@ pub struct ClickParams {
     /// left | right | middle
     #[serde(default)]
     pub button: Option<String>,
-    /// 2 for double-click.
+    /// Number of clicks (0–10; defaults to 1). Use 2 for double-click. Larger values are rejected.
     #[serde(default)]
     pub count: Option<u32>,
     /// {"shift":bool,"alt":bool,"command":bool,"ctrl":bool}
@@ -122,6 +122,7 @@ pub struct DragParams {
     pub from: Value,
     /// End point, same forms.
     pub to: Value,
+    /// Movement steps (0–1024; defaults to 12; 0 or 1 uses 2). Larger values are rejected.
     #[serde(default)]
     pub steps: Option<u32>,
     #[serde(default)]
@@ -137,6 +138,30 @@ pub struct KeyParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct TypeParams {
     pub text: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct MediaImportParams {
+    /// Absolute paths to media files (MP4/MOV, WAV/MP3/FLAC/AIFF/Ogg, PNG/JPEG/…).
+    pub paths: Vec<String>,
+    /// Bin ID to import into (optional).
+    #[serde(default)]
+    pub bin: Option<u64>,
+    /// Import numbered stills as an image sequence (optional, default false).
+    #[serde(default)]
+    pub image_sequence: Option<bool>,
+}
+
+/// `file.import` params for a `media_import` call.
+fn media_import_params(p: MediaImportParams) -> Value {
+    let mut params = json!({"paths": p.paths});
+    if let Some(bin) = p.bin {
+        params["bin"] = json!(bin);
+    }
+    if let Some(seq) = p.image_sequence {
+        params["imageSequence"] = json!(seq);
+    }
+    params
 }
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
@@ -249,14 +274,27 @@ impl FilmcraftMcp {
                 .await
                 .map_err(join_error)?
             }
-            Backend::Bridge(b) => b.call("engine.execute", json!({"command": id, "params": params})).await,
+            Backend::Bridge(b) => b.execute(id, params).await,
         }
     }
 
     /// The project tree plus the active sequence (null when there is none).
+    ///
+    /// `project.inspect` and `sequence.inspect` are two separate calls (two lock scopes in
+    /// headless mode, two round trips to the app in bridge mode), so the active sequence can
+    /// change between them if another client, or the app's own UI, switches sequence tabs in
+    /// that window (#1477). Pinning `sequence.inspect` to the `activeSequence` id this
+    /// `project.inspect` just reported keeps the pair consistent: the returned `sequence`, when
+    /// not null, always describes the sequence the returned `project.activeSequence` names.
     async fn document(&self) -> Result<Value, AutomationError> {
         let project = self.run("project.inspect", json!({})).await?;
-        let sequence = self.run("sequence.inspect", json!({})).await.ok();
+        // `ItemId` is a u64 (`item_p` parses the `item` param with `u64_p`): read it as one too,
+        // not `as_i64`, so an id above `i64::MAX` is still looked up instead of silently going null.
+        let active = project.get("activeSequence").and_then(Value::as_u64);
+        let sequence = match active {
+            Some(id) => self.run("sequence.inspect", json!({"item": id})).await.ok(),
+            None => None,
+        };
         Ok(json!({"project": project, "sequence": sequence}))
     }
 
@@ -381,9 +419,8 @@ impl FilmcraftMcp {
         description = "Import media files by absolute path (MP4/MOV, WAV/MP3/FLAC/AIFF/Ogg, PNG/JPEG/…).",
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false)
     )]
-    async fn media_import(&self, Parameters(p): Parameters<TypeParams>) -> Result<CallToolResult, McpError> {
-        let paths: Vec<&str> = p.text.split('\n').map(str::trim).filter(|s| !s.is_empty()).collect();
-        wrap(self.run("file.import", json!({"paths": paths})).await)
+    async fn media_import(&self, Parameters(p): Parameters<MediaImportParams>) -> Result<CallToolResult, McpError> {
+        wrap(self.run("file.import", media_import_params(p)).await)
     }
 
     #[tool(
@@ -397,14 +434,13 @@ impl FilmcraftMcp {
             Backend::Headless(s) => {
                 let s = s.clone();
                 let r = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, AutomationError> {
-                    let mut g = s.lock().unwrap_or_else(PoisonError::into_inner);
-                    if let Some(sec) = p.seconds {
-                        g.set_playhead(filmcraft_time::Tick::from_seconds_f64(sec));
-                    }
+                    let g = s.lock().unwrap_or_else(PoisonError::into_inner);
+                    // read-only: render at `seconds` without moving the playhead (#114)
+                    let t = p.seconds.map_or_else(|| g.playhead(), filmcraft_time::Tick::from_seconds_f64);
                     let (w, h) =
                         g.active_sequence().map(|q| (q.settings.width, q.settings.height)).ok_or_else(|| AutomationError::Other("no sequence".into()))?;
-                    let scale = (max as f32 / w.max(h) as f32).min(1.0);
-                    let img = g.render_program(scale).ok_or_else(|| AutomationError::Other("no sequence".into()))?;
+                    let scale = render_scale(max, w, h);
+                    let img = g.try_render_program_at(scale, t).map_err(|e| AutomationError::Other(e.to_string()))?;
                     png_rgba(img.w as u32, img.h as u32, img.over_black_rgba8(), max)
                 })
                 .await
@@ -415,12 +451,31 @@ impl FilmcraftMcp {
                 })
             }
             Backend::Bridge(b) => {
-                if let Some(sec) = p.seconds
-                    && let Err(e) = b.call("engine.execute", json!({"command": "playhead.set", "params": {"seconds": sec}})).await
-                {
+                let Some(sec) = p.seconds else {
+                    return self.screenshot(&b.clone(), Some("Program".into()), max).await;
+                };
+                // The Program monitor shows the playhead's frame, so the live playhead has to move
+                // for the screenshot; put it (and the selection, which may follow it) back after,
+                // so the tool stays read-only (#114).
+                let before = match self.run("sequence.inspect", json!({})).await {
+                    Ok(v) => v,
+                    Err(e) => return Ok(fail(e)),
+                };
+                if let Err(e) = self.run("playhead.set", json!({"seconds": sec})).await {
                     return Ok(fail(e));
                 }
-                self.screenshot(&b.clone(), Some("Program".into()), max).await
+                let shot = self.screenshot(&b.clone(), Some("Program".into()), max).await;
+                if let Some(t) = before.get("playhead").and_then(Value::as_i64) {
+                    let _ = self.run("playhead.set", json!({"time": t})).await;
+                }
+                // only when it changed: selecting also leaves trim mode
+                let now = self.run("sequence.inspect", json!({})).await.ok();
+                if let Some(sel) = before.get("selection").filter(|v| v.is_array())
+                    && now.as_ref().and_then(|n| n.get("selection")) != Some(sel)
+                {
+                    let _ = self.run("timeline.select", json!({"clips": sel})).await;
+                }
+                shot
             }
         }
     }
@@ -443,6 +498,7 @@ impl FilmcraftMcp {
         self.ui("ui.elements", json!({"prefix": p.prefix.unwrap_or_default()})).await
     }
 
+    /// Forward a click to the live editor; an omitted count is sent as null and uses its default.
     #[tool(
         title = "Live app: click",
         description = "Live app: click an element by id or at x,y (points). Supports right/middle button, double-click (count=2) and modifiers.",
@@ -459,6 +515,7 @@ impl FilmcraftMcp {
         self.ui("ui.click", v).await
     }
 
+    /// Forward a drag to the live editor, which applies the step default and validates its bounds.
     #[tool(
         title = "Live app: drag",
         description = "Live app: press-drag-release from one point/element to another (move clips, trim edges, scrub, resize panels, drop project items onto tracks).",
@@ -510,15 +567,21 @@ impl FilmcraftMcp {
 
 impl FilmcraftMcp {
     async fn screenshot(&self, b: &BridgeClient, panel: Option<String>, max: u32) -> Result<CallToolResult, McpError> {
-        let path = std::env::temp_dir().join(format!("filmcraft-mcp-{}.png", std::process::id()));
+        // The desktop bridge needs a pathname, so use a freshly-created,
+        // owner-only directory rather than exposing image bytes at a
+        // predictable shared-temp filename.
+        let dir = match tempfile::tempdir() {
+            Ok(dir) => dir,
+            Err(e) => return Ok(fail(format!("screenshot: {e}"))),
+        };
+        let path = dir.path().join("screenshot.png");
         if let Err(e) = b.call("ui.screenshot", json!({"path": path.to_string_lossy(), "panel": panel})).await {
             return Ok(fail(e));
         }
-        let bytes = match std::fs::read(&path) {
+        let bytes = match tokio::fs::read(&path).await {
             Ok(b) => b,
             Err(e) => return Ok(fail(format!("screenshot: {e}"))),
         };
-        let _ = std::fs::remove_file(&path);
         let bytes = match image::load_from_memory(&bytes) {
             Ok(img) => {
                 let rgba = img.to_rgba8();
@@ -543,7 +606,7 @@ impl FilmcraftMcp {
     }
 }
 
-const INSTRUCTIONS: &str = "Joose Clip video editor (Joose Labs fork of FilmCraft, Premiere Pro-class). Every edit is an engine command: `command_list` to discover ids/params, `command_run` to execute (undoable; `command_batch` runs several). `doc_inspect` (or `project_inspect`/`sequence_inspect`) returns ids you can pass to commands; `render_preview` shows the result. In bridge mode the `ui_*` tools drive the live app: `ui_elements` lists clickable ids, `ui_click`/`ui_drag`/`ui_key` operate it, `ui_screenshot` shows it. Time is in ticks: 254016000000 per second (commands also accept `seconds`, `frame` or `timecode`).";
+const INSTRUCTIONS: &str = "Joose Clip video editor (Joose Labs fork of Joose Clip, Premiere Pro-class). Every edit is an engine command: `command_list` to discover ids/params, `command_run` to execute (undoable; `command_batch` runs several). `doc_inspect` (or `project_inspect`/`sequence_inspect`) returns ids you can pass to commands; `render_preview` shows the result. In bridge mode the `ui_*` tools drive the live app: `ui_elements` lists clickable ids, `ui_click`/`ui_drag`/`ui_key` operate it, `ui_screenshot` shows it. Time is in ticks: 254016000000 per second (commands also accept `seconds`, `frame` or `timecode`).";
 
 /// Resources: the project (as `doc_inspect`) and the command catalog (as `command_list`).
 const DOCUMENT_URI: &str = "filmcraft://document";
@@ -574,8 +637,8 @@ impl ServerHandler for FilmcraftMcp {
             return Err(McpError::invalid_params(m, None));
         }
         // A blocking export reports progress and can be cancelled (docs/agents.md § Long exports).
+        // Bridge mode too: the app runs it as a job, so it stays responsive (#91, #92).
         if request.name == "command_run"
-            && matches!(&*self.backend, Backend::Headless(_))
             && let Some(a) = &request.arguments
             && let Some(id) = a.get("id").and_then(Value::as_str)
         {
@@ -630,9 +693,25 @@ impl ServerHandler for FilmcraftMcp {
     }
 }
 
+/// Render scale that fits the longest side of a `w` x `h` sequence into `max_side` (never upscales; 0 = no limit, as in `png_rgba`).
+fn render_scale(max_side: u32, w: u32, h: u32) -> f32 {
+    if max_side == 0 {
+        return 1.0;
+    }
+    (max_side as f32 / w.max(h).max(1) as f32).min(1.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn render_scale_zero_means_no_limit() {
+        assert_eq!(render_scale(0, 1920, 1080), 1.0);
+        assert_eq!(render_scale(960, 1920, 1080), 0.5);
+        assert_eq!(render_scale(960, 640, 360), 1.0);
+        assert_eq!(render_scale(960, 0, 0), 1.0);
+    }
 
     #[tokio::test]
     async fn headless_commands_and_render() {
@@ -643,6 +722,27 @@ mod tests {
         assert!(v["cuts"].as_u64().unwrap() >= 2);
         let r = m.render_frame(Parameters(RenderParams { seconds: Some(1.0), max_side: Some(320) })).await.unwrap();
         assert_ne!(r.is_error, Some(true));
+    }
+
+    /// `render_frame` / `render_preview` are annotated read-only (#114): rendering at `seconds`
+    /// leaves the playhead, and the selection that follows it, where they were, and still renders
+    /// the frame at `seconds`.
+    #[tokio::test]
+    async fn rendering_at_a_time_does_not_move_the_playhead() {
+        let m = FilmcraftMcp::headless(demo());
+        m.run("sequence.selectionFollowsPlayhead", json!({"on": true})).await.unwrap();
+        m.run("playhead.set", json!({"seconds": 1.0})).await.unwrap();
+        let before = m.run("sequence.inspect", json!({})).await.unwrap();
+        let png = |r: CallToolResult| serde_json::to_string(&r.content).unwrap();
+        let at_playhead = png(m.render_frame(Parameters(RenderParams { seconds: None, max_side: Some(64) })).await.unwrap());
+        for seconds in [5.0, 8.0] {
+            let r = m.render_frame(Parameters(RenderParams { seconds: Some(seconds), max_side: Some(64) })).await.unwrap();
+            assert_ne!(png(r), at_playhead, "renders the frame at {seconds} s");
+            m.render_preview(Parameters(RenderParams { seconds: Some(seconds), max_side: Some(64) })).await.unwrap();
+        }
+        let after = m.run("sequence.inspect", json!({})).await.unwrap();
+        assert_eq!(after["playhead"], before["playhead"]);
+        assert_eq!(after["selection"], before["selection"]);
     }
 
     /// One request/response exchange over `serve_io`, as an MCP client sees it.
@@ -678,6 +778,21 @@ mod tests {
         async fn call(&mut self, id: u64, name: &str, arguments: Value) -> Value {
             self.ask(json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":name,"arguments":arguments}})).await
         }
+    }
+
+    /// #499: `media_import` takes `paths` (a required array), and forwards `bin` / `image_sequence` to `file.import`.
+    #[test]
+    fn media_import_schema_and_params() {
+        let m = FilmcraftMcp::headless(Session::default());
+        let def = m.tool_router.get("media_import").unwrap();
+        let schema = Value::Object((*def.input_schema).clone());
+        assert_eq!(schema["properties"]["paths"]["type"], "array", "{schema}");
+        assert!(schema["required"].as_array().unwrap().iter().any(|r| r == "paths"), "{schema}");
+        let p: MediaImportParams = serde_json::from_value(json!({"paths": ["/a.png"], "bin": 7, "image_sequence": true})).unwrap();
+        assert_eq!(media_import_params(p), json!({"paths": ["/a.png"], "bin": 7, "imageSequence": true}));
+        let p: MediaImportParams = serde_json::from_value(json!({"paths": ["/a.wav"]})).unwrap();
+        assert_eq!(media_import_params(p), json!({"paths": ["/a.wav"]}));
+        assert!(serde_json::from_value::<MediaImportParams>(json!({"text": "/a.wav"})).is_err());
     }
 
     fn demo() -> Session {
@@ -904,5 +1019,74 @@ mod tests {
         assert!(v.is_object(), "{v}");
         let r = m.render_frame(Parameters(RenderParams { seconds: Some(0.5), max_side: Some(64) })).await.unwrap();
         assert_ne!(r.is_error, Some(true));
+    }
+
+    /// `doc_inspect` composes `project.inspect` and `sequence.inspect` as two separate round
+    /// trips to the app. If the active sequence changes between them (another client, or the
+    /// app's own UI, switching tabs in that window), an unscoped `sequence.inspect` answers for
+    /// whichever sequence is active *now*, not the one `project.inspect` just reported, so the
+    /// pair comes back inconsistent (#1477, reproduced with a real bridge client and a flipping
+    /// `sequence.open` in `race_test.py`: ~300/300 calls mismatched). Pinning the second call to
+    /// the id the first one reported keeps `sequence`, when not null, always describing the
+    /// sequence `project.activeSequence` names.
+    #[tokio::test]
+    async fn doc_inspect_pins_the_sequence_to_the_reported_active_id() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        tokio::spawn(async move {
+            let (s, _) = listener.accept().await.unwrap();
+            let (r, mut w) = s.into_split();
+            let mut lines = tokio::io::BufReader::new(r).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let req: Value = serde_json::from_str(&line).unwrap();
+                let result = match req["params"]["command"].as_str().unwrap_or_default() {
+                    "project.inspect" => json!({"activeSequence": 21}),
+                    // The app's own active sequence has since moved on to 54; only an explicit
+                    // `item` still gets 21's data (an unscoped call would wrongly answer for 54).
+                    "sequence.inspect" => json!({"id": req["params"]["params"]["item"].as_i64().unwrap_or(54)}),
+                    _ => Value::Null,
+                };
+                let line = format!("{}\n", json!({"id": req["id"], "ok": true, "result": result}));
+                w.write_all(line.as_bytes()).await.unwrap();
+            }
+        });
+        let m = FilmcraftMcp::bridge(&addr).unwrap();
+        let v = m.document().await.unwrap();
+        assert_eq!(v["project"]["activeSequence"], json!(21), "{v}");
+        assert_eq!(v["sequence"]["id"], json!(21), "sequence must describe the reported active id, not whatever is active now: {v}");
+    }
+
+    /// `activeSequence` is a `u64` (`ItemId`'s representation; `item_p` parses the `item` param
+    /// with `u64_p`), so an id above `i64::MAX` must still round-trip through `document()`:
+    /// reading it with `as_i64` would silently return `None` and make `sequence` go null instead
+    /// of inspecting the (valid) id project.inspect reported.
+    #[tokio::test]
+    async fn doc_inspect_handles_an_active_sequence_id_above_i64_max() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        const HUGE: u64 = i64::MAX as u64 + 1;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        tokio::spawn(async move {
+            let (s, _) = listener.accept().await.unwrap();
+            let (r, mut w) = s.into_split();
+            let mut lines = tokio::io::BufReader::new(r).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let req: Value = serde_json::from_str(&line).unwrap();
+                let result = match req["params"]["command"].as_str().unwrap_or_default() {
+                    "project.inspect" => json!({"activeSequence": HUGE}),
+                    // Echoes back whatever `item` it was actually asked for, so the test can
+                    // check that `document()` asked for `HUGE` rather than nothing at all.
+                    "sequence.inspect" => json!({"id": req["params"]["params"]["item"]}),
+                    _ => Value::Null,
+                };
+                let line = format!("{}\n", json!({"id": req["id"], "ok": true, "result": result}));
+                w.write_all(line.as_bytes()).await.unwrap();
+            }
+        });
+        let m = FilmcraftMcp::bridge(&addr).unwrap();
+        let v = m.document().await.unwrap();
+        assert_eq!(v["project"]["activeSequence"].as_u64(), Some(HUGE), "{v}");
+        assert_eq!(v["sequence"]["id"].as_u64(), Some(HUGE), "an id above i64::MAX must still be inspected, not dropped to a null sequence: {v}");
     }
 }
