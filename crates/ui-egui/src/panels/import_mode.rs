@@ -31,8 +31,8 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         let resp = ui.interact(r, egui::Id::unique(("imp", *cmd)), Sense::click());
         app.auto.add(&format!("import.{cmd}"), r, title);
         ui.painter().rect_filled(r, 8.0, if resp.hovered() { t.hover } else { t.tl_header_bg });
-        ui.painter().text(r.min + vec2(16.0, 110.0), Align2::LEFT_CENTER, *title, Tokens::semibold(14.0), t.text);
-        ui.painter().text(r.min + vec2(16.0, 132.0), Align2::LEFT_CENTER, *sub, Tokens::ui(11.5), t.text_dim);
+        ui.painter().text(r.min + vec2(16.0, 110.0), Align2::LEFT_CENTER, title.to_string(), Tokens::semibold(14.0), t.text);
+        ui.painter().text(r.min + vec2(16.0, 132.0), Align2::LEFT_CENTER, sub.to_string(), Tokens::ui(11.5), t.text_dim);
         crate::icons::paint(
             ui.painter(),
             Rect::from_min_size(r.min + vec2(16.0, 18.0), vec2(56.0, 56.0)),
