@@ -62,6 +62,11 @@ pub struct HostHooks {
     pub system_languages: Option<Box<dyn Fn() -> Vec<String>>>,
     /// Open dialog for a JSON file (shortcut preset import): filter name, extensions → path.
     pub pick_open_file: Option<Box<dyn FnMut(&str, &[&str]) -> Option<String>>>,
+    /// Register the macOS window drag types winit does not ship (modern Finder promises file
+    /// URLs, winit registers the legacy filenames type only). Runs once on the first frame;
+    /// the window is then live for drag-import. Elsewhere: not installed, drop handling stays
+    /// winit's own.
+    pub mac_window_drop_types: Option<Box<dyn FnMut() -> Result<(), String>>>,
     /// Folder picker (Link Media search, proxy and Project Manager destinations).
     pub pick_folder: Option<Box<dyn FnMut() -> Option<String>>>,
     /// Folder picker starting at the current destination (Export Frame).

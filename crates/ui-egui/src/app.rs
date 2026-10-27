@@ -45,6 +45,7 @@ impl FilmcraftApp {
             audio: None,
             scrub: Default::default(),
             hooks: HostHooks::default(),
+            drop_types_registered: false,
             // Unsaved changes left by a session that died are offered first thing.
             dialog: recovery.then_some(Dialog::Recovery),
             updates_rt: Default::default(),
@@ -303,6 +304,16 @@ impl FilmcraftApp {
         self.ui_clock = self.ui_clock.max(ctx.input(|i| i.time));
         // a native file dialog's answer first, so the panels draw what it chose (#260)
         self.poll_native_dialog(ctx);
+        // macOS drag types register once on the first frame (the Finder's file URLs; winit ships
+        // the legacy filenames type only). A dead import path is reported, never silent.
+        if !self.drop_types_registered {
+            self.drop_types_registered = true; // one attempt; without the hook drop handling stays winit's own
+            if let Some(h) = self.hooks.mac_window_drop_types.as_mut()
+                && let Err(e) = h()
+            {
+                self.ui.status = e; // §0.1: a dead import path is reported, never silent
+            }
+        }
         self.logic_theme(ctx);
         let now = self.logic_clock(ctx);
         self.logic_control(ctx);

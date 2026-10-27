@@ -37,6 +37,8 @@ mod logging;
 #[cfg(target_os = "macos")]
 mod native_menu;
 mod window_raise;
+#[cfg(target_os = "macos")]
+mod window_drop_types;
 
 use args::{Cli, Launch};
 use chrono::TimeZone;
@@ -327,6 +329,10 @@ fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<A
         app.hooks.raise_without_focus = Some(Box::new(|| {
             window_raise::raise_without_focus();
         }));
+        #[cfg(target_os = "macos")]
+        {
+            app.hooks.mac_window_drop_types = Some(Box::new(|| window_drop_types::register_types().map(|_| ())));
+        }
         app.hooks.pick_open_file = Some(Box::new(|filter: &str, exts: &[&str]| {
             rfd::FileDialog::new()
                 .add_filter(filmcraft_ui_egui::i18n::t(filter), &file_filters::extensions(exts))
